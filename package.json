@@ -1,0 +1,17 @@
+{
+  "name": "@castlekit/castle",
+  "version": "0.0.1",
+  "description": "The extensible kit for AI agents",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/castlekit/castle.git"
+  },
+  "keywords": ["ai", "agents", "openclaw", "multi-agent"],
+  "author": "Castle Kit Inc.",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/castlekit/castle/issues"
+  },
+  "homepage": "https://github.com/castlekit/castle#readme"
+}
