@@ -14,11 +14,8 @@ import {
   writeConfig,
   type CastleConfig,
 } from "../lib/config.js";
-import {
-  getOrCreateIdentity,
-  signChallenge as signDeviceChallenge,
-  saveDeviceToken as persistDeviceToken,
-} from "../lib/device-identity.js";
+// Device identity is handled by gateway-connection.ts for the persistent connection.
+// The onboarding wizard uses simple token-only auth for agent discovery.
 
 // Read version from package.json at the project root
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -91,17 +88,9 @@ async function discoverAgents(
     });
 
     ws.on("open", () => {
-      // Device identity for the handshake
-      let deviceParams: Record<string, unknown> | undefined;
-      try {
-        const identity = getOrCreateIdentity();
-        deviceParams = { id: identity.deviceId, publicKey: identity.publicKey };
-      } catch (err) {
-        // Device identity not available yet — proceed without
-        console.debug("[Device] Could not load identity:", (err as Error).message);
-      }
-
       // Send connect handshake
+      // NOTE: No device identity here — discoverAgents is just for listing agents
+      // during setup. Device auth happens in gateway-connection.ts for the real connection.
       const connectId = randomUUID();
       const connectFrame = {
         type: "req",
@@ -118,7 +107,6 @@ async function discoverAgents(
             mode: "backend",
           },
           auth: token ? { token } : undefined,
-          device: deviceParams,
           role: "operator",
           scopes: ["operator.admin"],
           caps: [],
@@ -131,34 +119,6 @@ async function discoverAgents(
         try {
           const msg = JSON.parse(data.toString());
 
-          // Handle connect.challenge — sign and re-send
-          if (msg.type === "event" && msg.event === "connect.challenge") {
-            const nonce = msg.payload?.nonce;
-            if (nonce && typeof nonce === "string" && deviceParams) {
-              try {
-                const signature = signDeviceChallenge(nonce);
-                const challengeFrame = {
-                  type: "req",
-                  id: connectId,
-                  method: "connect",
-                  params: {
-                    ...connectFrame.params,
-                    device: {
-                      ...deviceParams,
-                      signature,
-                      nonce,
-                      signedAt: Date.now(),
-                    },
-                  },
-                };
-                ws.send(JSON.stringify(challengeFrame));
-              } catch (err) {
-                console.debug("[Device] Challenge signing failed:", (err as Error).message);
-              }
-            }
-            return;
-          }
-
           // Connect response
           if (msg.type === "res" && msg.id === connectId) {
             if (!msg.ok) {
@@ -167,17 +127,6 @@ async function discoverAgents(
               resolve([]);
               return;
             }
-
-            // Save device token if provided in hello-ok
-            const helloOk = msg.payload || {};
-            if (helloOk.deviceToken && typeof helloOk.deviceToken === "string") {
-              try {
-                persistDeviceToken(helloOk.deviceToken, wsUrl);
-              } catch (err) {
-                console.debug("[Device] Failed to save device token:", (err as Error).message);
-              }
-            }
-
             // Connected -- now request agents
             const agentsId = randomUUID();
             const agentsFrame = {
