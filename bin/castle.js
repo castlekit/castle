@@ -42,6 +42,70 @@ program
   });
 
 program
+  .command("update")
+  .description("Check for updates and install the latest version")
+  .action(async () => {
+    const { execSync } = await import("child_process");
+
+    console.log(pc.bold("\n  🏰 Castle\n"));
+    console.log(pc.dim("  Checking for updates...\n"));
+
+    let latest;
+    try {
+      latest = execSync("npm view @castlekit/castle version", {
+        encoding: "utf-8",
+        timeout: 15000,
+        stdio: ["ignore", "pipe", "ignore"],
+      }).trim();
+    } catch {
+      console.log(pc.yellow("  Could not check for updates. Try again later.\n"));
+      return;
+    }
+
+    if (version === latest) {
+      console.log(`  You're on the latest version (${pc.green(version)}).\n`);
+      return;
+    }
+
+    // Check for major version bump
+    const currentMajor = parseInt(version.split(".")[0], 10);
+    const latestMajor = parseInt(latest.split(".")[0], 10);
+
+    if (latestMajor > currentMajor) {
+      const readline = await import("readline");
+      const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+      const answer = await new Promise((resolve) => {
+        rl.question(
+          `  ${pc.yellow("⚠")} Castle ${pc.cyan(latest)} is available (you have ${pc.dim(version)}).\n` +
+          `  This is a major version update and may include breaking changes.\n\n` +
+          `  Continue? (y/N) `,
+          resolve
+        );
+      });
+      rl.close();
+
+      if (answer.toLowerCase() !== "y") {
+        console.log(pc.dim("\n  Update cancelled.\n"));
+        return;
+      }
+      console.log();
+    }
+
+    console.log(`  Updating Castle from ${pc.dim(version)} to ${pc.cyan(latest)}...\n`);
+
+    try {
+      execSync(`npm install -g @castlekit/castle@${latest}`, {
+        stdio: "inherit",
+        timeout: 120000,
+      });
+      console.log(pc.green(`\n  ✔ Updated successfully!\n`));
+    } catch {
+      console.log(pc.red(`\n  Update failed.`));
+      console.log(`  Try manually: ${pc.cyan(`npm install -g @castlekit/castle@${latest}`)}\n`);
+    }
+  });
+
+program
   .command("status")
   .description("Show Castle and agent status")
   .action(async () => {
@@ -83,10 +147,11 @@ if (process.argv.length <= 2) {
     } else {
       console.log(pc.bold("\n  🏰 Castle\n"));
       console.log(pc.dim("  The multi-agent workspace.\n"));
-      console.log(`  ${pc.cyan("castle open")}    Open the web UI`);
-      console.log(`  ${pc.cyan("castle setup")}   Re-run setup wizard`);
-      console.log(`  ${pc.cyan("castle status")}  Show status`);
-      console.log(`  ${pc.cyan("castle --help")}  All commands\n`);
+      console.log(`  ${pc.cyan("castle open")}     Open the web UI`);
+      console.log(`  ${pc.cyan("castle setup")}    Re-run setup wizard`);
+      console.log(`  ${pc.cyan("castle status")}   Show status`);
+      console.log(`  ${pc.cyan("castle update")}   Check for updates`);
+      console.log(`  ${pc.cyan("castle --help")}   All commands\n`);
     }
   })();
 } else {
