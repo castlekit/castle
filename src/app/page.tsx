@@ -7,23 +7,33 @@ import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { cn } from "@/lib/utils";
 import { useOpenClaw, type OpenClawAgent } from "@/lib/hooks/use-openclaw";
 
 function getInitials(name: string) {
   return name.slice(0, 2).toUpperCase();
 }
 
-function AgentCard({ agent, isPrimary }: { agent: OpenClawAgent; isPrimary: boolean }) {
+function AgentCard({ agent, isPrimary, isConnected }: { agent: OpenClawAgent; isPrimary: boolean; isConnected: boolean }) {
   return (
     <Card
       variant="bordered"
-      className="p-4 hover:border-border-hover transition-colors"
+      className={cn(
+        "p-4 transition-colors",
+        isConnected
+          ? "hover:border-border-hover"
+          : "opacity-60"
+      )}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Avatar size="md" status="online">
+          <Avatar size="md" status={isConnected ? "online" : "offline"}>
             {agent.avatar ? (
-              <AvatarImage src={agent.avatar} alt={agent.name} />
+              <AvatarImage
+                src={agent.avatar}
+                alt={agent.name}
+                className={cn(!isConnected && "grayscale")}
+              />
             ) : (
               <AvatarFallback>
                 {agent.emoji || getInitials(agent.name)}
@@ -43,11 +53,18 @@ function AgentCard({ agent, isPrimary }: { agent: OpenClawAgent; isPrimary: bool
               )}
             </div>
             <p className="text-xs text-foreground-muted">
-              {agent.description || "OpenClaw Agent"}
+              {isConnected
+                ? (agent.description || "OpenClaw Agent")
+                : "Unreachable"}
             </p>
           </div>
         </div>
-        <Badge variant="success" size="sm">Active</Badge>
+        <Badge
+          variant={isConnected ? "success" : "outline"}
+          size="sm"
+        >
+          {isConnected ? "Active" : "Offline"}
+        </Badge>
       </div>
     </Card>
   );
@@ -237,6 +254,7 @@ export default function HomePage() {
                     key={agent.id}
                     agent={agent}
                     isPrimary={idx === 0}
+                    isConnected={isConnected}
                   />
                 ))}
               </div>
