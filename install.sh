@@ -553,6 +553,20 @@ install_castle() {
 
     local resolved_version=""
     resolved_version="$(npm view "${install_spec}" version 2>/dev/null || true)"
+
+    # Check if this version is already installed
+    local installed_version=""
+    installed_version="$(npm list -g @castlekit/castle --depth=0 --json 2>/dev/null | node -e "
+        let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
+            try{const j=JSON.parse(d);console.log(j.dependencies?.['@castlekit/castle']?.version||'')}catch{}
+        })
+    " 2>/dev/null || true)"
+
+    if [[ -n "$resolved_version" && "$installed_version" == "$resolved_version" ]]; then
+        echo -e "${SUCCESS}✓${NC} Castle ${INFO}${resolved_version}${NC} already installed"
+        return 0
+    fi
+
     if [[ -n "$resolved_version" ]]; then
         echo -e "${WARN}→${NC} Installing Castle ${INFO}${resolved_version}${NC}..."
     else
@@ -642,6 +656,9 @@ main() {
     # Step 6: Run onboarding
     if [[ "$NO_ONBOARD" == "1" ]]; then
         echo -e "Skipping setup (requested). Run ${INFO}castle setup${NC} later."
+    elif [[ -f "$HOME/.castle/castle.json" ]]; then
+        echo -e "${SUCCESS}✓${NC} Castle is already configured"
+        echo -e "${MUTED}Run ${INFO}castle setup${NC} to reconfigure.${NC}"
     else
         if [[ -r /dev/tty && -w /dev/tty ]]; then
             echo -e "Starting setup..."
