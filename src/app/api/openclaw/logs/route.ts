@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { readFileSync, existsSync, readdirSync } from "fs";
 import { join } from "path";
 import { getOpenClawDir } from "@/lib/config";
+import { sanitizeForApi } from "@/lib/api-security";
 
 export const dynamic = "force-dynamic";
 
@@ -41,8 +42,8 @@ export async function GET(request: NextRequest) {
     const content = readFileSync(logPath, "utf-8");
     const allLines = content.split("\n").filter(Boolean);
 
-    // Return last N lines
-    const tailLines = allLines.slice(-lines);
+    // Return last N lines, sanitized to strip tokens/keys
+    const tailLines = allLines.slice(-lines).map(sanitizeForApi);
 
     return NextResponse.json({
       logs: tailLines,

@@ -1,6 +1,7 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { platform } from "os";
 import JSON5 from "json5";
 
 export interface CastleConfig {
@@ -72,6 +73,14 @@ export function writeConfig(config: CastleConfig): void {
   const configPath = getConfigPath();
   const content = JSON5.stringify(config, null, 2);
   writeFileSync(configPath, content, "utf-8");
+  // Restrict permissions — castle.json may contain gateway_token
+  if (platform() !== "win32") {
+    try {
+      chmodSync(configPath, 0o600);
+    } catch {
+      // May fail on some filesystems
+    }
+  }
 }
 
 /**

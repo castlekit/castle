@@ -578,6 +578,10 @@ export async function runOnboarding(): Promise<void> {
     // Nothing on port or lsof not available
   }
 
+  // Escape XML special characters for plist values
+  const xmlEscape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
   // Install as a persistent service (auto-start on login)
   if (process.platform === "darwin") {
     const plistDir = join(home(), "Library", "LaunchAgents");
@@ -591,14 +595,14 @@ export async function runOnboarding(): Promise<void> {
     <string>com.castlekit.castle</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${nodePath}</string>
-        <string>${nextBin}</string>
+        <string>${xmlEscape(nodePath)}</string>
+        <string>${xmlEscape(nextBin)}</string>
         <string>start</string>
         <string>-p</string>
-        <string>${castlePort}</string>
+        <string>${xmlEscape(castlePort)}</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>${PROJECT_ROOT}</string>
+    <string>${xmlEscape(PROJECT_ROOT)}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -607,15 +611,15 @@ export async function runOnboarding(): Promise<void> {
         <false/>
     </dict>
     <key>StandardOutPath</key>
-    <string>${logsDir}/server.log</string>
+    <string>${xmlEscape(logsDir)}/server.log</string>
     <key>StandardErrorPath</key>
-    <string>${logsDir}/server.err</string>
+    <string>${xmlEscape(logsDir)}/server.err</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>NODE_ENV</key>
         <string>production</string>
         <key>PATH</key>
-        <string>${process.env.PATH}</string>
+        <string>${xmlEscape(process.env.PATH || "")}</string>
     </dict>
 </dict>
 </plist>`;

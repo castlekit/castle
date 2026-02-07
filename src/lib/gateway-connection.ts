@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import { EventEmitter } from "events";
 import { randomUUID } from "crypto";
 import { getGatewayUrl, readOpenClawToken, readConfig, configExists } from "./config";
-import { getOrCreateIdentity, signChallenge, saveDeviceToken, getDeviceToken, clearDeviceToken } from "./device-identity";
+import { getOrCreateIdentity, signDeviceAuth, saveDeviceToken, getDeviceToken, clearDeviceToken } from "./device-identity";
 
 // ============================================================================
 // Types
@@ -138,7 +138,7 @@ class GatewayConnection extends EventEmitter {
     try {
       this.ws = new WebSocket(url);
     } catch (err) {
-      console.error("[Gateway] Failed to create WebSocket:", err);
+      console.error("[Gateway] Failed to create WebSocket:", (err as Error).message);
       this._state = "error";
       this.emit("stateChange", this._state);
       this.scheduleReconnect();
@@ -158,7 +158,7 @@ class GatewayConnection extends EventEmitter {
         const identity = getOrCreateIdentity();
         deviceIdentity = { deviceId: identity.deviceId, publicKey: identity.publicKey };
       } catch (err) {
-        console.warn("[Gateway] Could not load device identity:", err);
+        console.warn("[Gateway] Could not load device identity:", (err as Error).message);
       }
     } else {
       console.log("[Gateway] Device auth disabled — using token-only");
@@ -179,31 +179,31 @@ class GatewayConnection extends EventEmitter {
       // because the Gateway requires signature + signedAt whenever device is present.
       let challengeReceived = false;
 
+      // Connection identity constants — must match what's signed
+      const CLIENT_ID = "gateway-client";
+      const CLIENT_MODE = "backend";
+      const ROLE = "operator";
+      const SCOPES = ["operator.admin"];
+      const authToken = savedDeviceToken || token;
+
       const buildConnectFrame = (challenge?: {
         nonce: string;
         signature: string;
+        signedAt: number;
       }): RequestFrame => {
-        // Auth: use saved deviceToken on reconnect, otherwise gateway token
-        const authPayload: Record<string, unknown> = {};
-        if (savedDeviceToken) {
-          authPayload.token = savedDeviceToken;
-        } else {
-          authPayload.token = token;
-        }
-
         const params: Record<string, unknown> = {
           minProtocol: 3,
           maxProtocol: 3,
           client: {
-            id: "gateway-client",
+            id: CLIENT_ID,
             displayName: "Castle",
             version: "0.0.1",
             platform: process.platform,
-            mode: "backend",
+            mode: CLIENT_MODE,
           },
-          auth: authPayload,
-          role: "operator",
-          scopes: ["operator.admin"],
+          auth: { token: authToken },
+          role: ROLE,
+          scopes: SCOPES,
           caps: [],
         };
 
@@ -214,7 +214,7 @@ class GatewayConnection extends EventEmitter {
             publicKey: deviceIdentity.publicKey,
             signature: challenge.signature,
             nonce: challenge.nonce,
-            signedAt: Date.now(),
+            signedAt: challenge.signedAt,
           };
         }
 
@@ -242,8 +242,15 @@ class GatewayConnection extends EventEmitter {
               challengeReceived = true;
               console.log("[Gateway] Challenge received — signing with device key");
               try {
-                const signature = signChallenge(nonce);
-                const challengeFrame = buildConnectFrame({ nonce, signature });
+                const { signature, signedAt } = signDeviceAuth({
+                  nonce,
+                  clientId: CLIENT_ID,
+                  clientMode: CLIENT_MODE,
+                  role: ROLE,
+                  scopes: SCOPES,
+                  token: authToken!,
+                });
+                const challengeFrame = buildConnectFrame({ nonce, signature, signedAt });
                 this.ws?.send(JSON.stringify(challengeFrame));
               } catch (err) {
                 console.error("[Gateway] Failed to sign challenge:", (err as Error).message);
@@ -278,7 +285,7 @@ class GatewayConnection extends EventEmitter {
               try {
                 saveDeviceToken(approvedToken, url);
               } catch (err) {
-                console.error("[Gateway] Failed to save device token:", err);
+                console.error("[Gateway] Failed to save device token:", (err as Error).message);
               }
             }
             this.emit("pairingApproved", msg.payload);
@@ -313,7 +320,7 @@ class GatewayConnection extends EventEmitter {
                   saveDeviceToken(helloDeviceToken, url);
                   console.log("[Gateway] Device token received and saved");
                 } catch (err) {
-                  console.error("[Gateway] Failed to save device token:", err);
+                  console.error("[Gateway] Failed to save device token:", (err as Error).message);
                 }
               }
 
@@ -371,7 +378,7 @@ class GatewayConnection extends EventEmitter {
             } as GatewayEvent);
           }
         } catch (err) {
-          console.error("[Gateway] Failed to parse handshake message:", err);
+          console.error("[Gateway] Failed to parse handshake message:", (err as Error).message);
         }
       };
 
@@ -405,9 +412,10 @@ class GatewayConnection extends EventEmitter {
       const reasonStr = reason?.toString() || "none";
       this.cleanup();
 
-      // If Gateway rejected device identity, retry without it (class-level flag persists)
-      if (code === 1008 && reasonStr.includes("device identity mismatch") && !this._skipDeviceAuth) {
-        console.log("[Gateway] Device identity not recognized — retrying with token-only auth");
+      // If Gateway rejected device auth (identity mismatch, bad signature, etc),
+      // fall back to token-only auth
+      if (code === 1008 && !this._skipDeviceAuth) {
+        console.log(`[Gateway] Device auth rejected (${reasonStr}) — retrying with token-only auth`);
         this._skipDeviceAuth = true;
         this.reconnectAttempts = 0;
         this.scheduleReconnect();

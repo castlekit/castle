@@ -1,14 +1,17 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { execSync } from "child_process";
+import { checkCsrf } from "@/lib/api-security";
 
 export const dynamic = "force-dynamic";
 
 /**
  * POST /api/openclaw/restart
- * God mode: restart the OpenClaw Gateway process.
- * Tries common methods to restart the gateway.
+ * Restart the OpenClaw Gateway process.
+ * Protected against CSRF — only requests from the Castle UI are allowed.
  */
-export async function POST() {
+export async function POST(request: NextRequest) {
+  const csrf = checkCsrf(request);
+  if (csrf) return csrf;
   try {
     // Try openclaw CLI restart first
     try {
