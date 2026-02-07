@@ -377,17 +377,7 @@ export async function runOnboarding(): Promise<void> {
 
   // Find node and next paths for the service
   const nodePath = process.execPath;
-
-  // Locate next binary reliably (works for both local and global installs)
-  let nextBin: string;
-  try {
-    // npm bin gives the local node_modules/.bin directory
-    const binDir = execSyncChild("npm bin", { cwd: PROJECT_ROOT, encoding: "utf-8" }).trim();
-    nextBin = join(binDir, "next");
-  } catch {
-    // Fallback: try local node_modules directly
-    nextBin = join(PROJECT_ROOT, "node_modules", ".bin", "next");
-  }
+  const nextBin = join(PROJECT_ROOT, "node_modules", ".bin", "next");
 
   // Castle port from config or default
   const castlePort = String(config.server?.port || 3333);
@@ -395,18 +385,17 @@ export async function runOnboarding(): Promise<void> {
   // Write PID file helper
   const pidFile = join(castleDir, "server.pid");
 
-  // Kill any existing Castle server and wait for it to release the port
+  // Kill any existing Castle server (by PID file)
   try {
     const existingPid = parseInt(readF(pidFile, "utf-8").trim(), 10);
     if (Number.isInteger(existingPid) && existingPid > 0) {
       process.kill(existingPid);
-      // Wait up to 3s for old process to die
       for (let i = 0; i < 30; i++) {
         try {
-          process.kill(existingPid, 0); // Test if alive
+          process.kill(existingPid, 0);
           await new Promise((r) => setTimeout(r, 100));
         } catch {
-          break; // Process is gone
+          break;
         }
       }
     }
@@ -414,25 +403,19 @@ export async function runOnboarding(): Promise<void> {
     // No existing server or already dead
   }
 
-  // Start production server
-  const server = spawn(nodePath, [nextBin, "start", "-p", castlePort], {
-    cwd: PROJECT_ROOT,
-    stdio: ["ignore", "ignore", "ignore"],
-    detached: true,
-  });
-
-  // Write PID file so we can manage the server later
-  if (server.pid != null) {
-    writeFile(pidFile, String(server.pid));
+  // Kill anything else on the target port
+  try {
+    execSyncChild(`lsof -ti:${castlePort} | xargs kill -9 2>/dev/null`, {
+      stdio: "ignore",
+      timeout: 5000,
+    });
+    await new Promise((r) => setTimeout(r, 500));
+  } catch {
+    // Nothing on port or lsof not available
   }
-  server.unref();
 
   // Install as a persistent service (auto-start on login)
   if (process.platform === "darwin") {
-    // macOS: LaunchAgent
-    // We unload first to avoid conflicts, then load. KeepAlive is set to
-    // SuccessfulExit=false so launchd only restarts on crashes, not when
-    // we intentionally stop it.
     const plistDir = join(home(), "Library", "LaunchAgents");
     mkDir(plistDir, { recursive: true });
     const plistPath = join(plistDir, "com.castlekit.castle.plist");
@@ -472,23 +455,16 @@ export async function runOnboarding(): Promise<void> {
     </dict>
 </dict>
 </plist>`;
-    // Stop any running instance first, then kill our manually spawned one
-    // so launchd takes over as the sole process manager
     try {
-      execSyncChild(`launchctl unload "${plistPath}" 2>/dev/null`, { stdio: "ignore" });
+      execSyncChild(`launchctl unload "${plistPath}" 2>/dev/null`, { stdio: "ignore", timeout: 10000 });
     } catch { /* ignore */ }
     writeFile(plistPath, plist);
     try {
-      // Kill the spawn()ed server — launchd will now be the owner
-      if (server.pid) {
-        try { process.kill(server.pid); } catch { /* already dead */ }
-      }
-      execSyncChild(`launchctl load "${plistPath}"`, { stdio: "ignore" });
+      execSyncChild(`launchctl load "${plistPath}"`, { stdio: "ignore", timeout: 10000 });
     } catch {
-      // Non-fatal: server is already running via spawn
+      // Non-fatal — fall back to spawning directly
     }
   } else if (process.platform === "linux") {
-    // Linux: systemd user service
     const systemdDir = join(home(), ".config", "systemd", "user");
     mkDir(systemdDir, { recursive: true });
     const servicePath = join(systemdDir, "castle.service");
@@ -509,14 +485,30 @@ WantedBy=default.target
 `;
     writeFile(servicePath, service);
     try {
-      execSyncChild("systemctl --user daemon-reload && systemctl --user enable --now castle.service", { stdio: "ignore" });
+      execSyncChild("systemctl --user daemon-reload && systemctl --user enable --now castle.service", { stdio: "ignore", timeout: 15000 });
     } catch {
-      // Non-fatal: server is already running via spawn
+      // Non-fatal
     }
   }
 
+  // If no service manager started it, spawn directly
+  try {
+    await fetch(`http://localhost:${castlePort}`);
+  } catch {
+    // Server not up yet — spawn it directly as fallback
+    const server = spawn(nodePath, [nextBin, "start", "-p", castlePort], {
+      cwd: PROJECT_ROOT,
+      stdio: ["ignore", "ignore", "ignore"],
+      detached: true,
+    });
+    if (server.pid != null) {
+      writeFile(pidFile, String(server.pid));
+    }
+    server.unref();
+  }
+
   // Wait for server to be ready
-  const maxWait = 30000;
+  const maxWait = 45000;
   const startTime = Date.now();
   let serverReady = false;
 

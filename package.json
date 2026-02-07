@@ -1,6 +1,6 @@
 {
   "name": "@castlekit/castle",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "The multi-agent workspace",
   "type": "module",
   "bin": {
