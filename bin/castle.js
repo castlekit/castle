@@ -1,15 +1,32 @@
-#!/usr/bin/env -S node --import tsx
+#!/usr/bin/env node
 
 // Castle CLI - The multi-agent workspace
 // https://castlekit.com
 
-import { program } from "commander";
-import pc from "picocolors";
-import { readFileSync } from "fs";
-import { resolve, dirname } from "path";
+// Bootstrap tsx from the package's own node_modules so it works
+// regardless of the user's current working directory.
+import { dirname, resolve } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+if (!process.env._CASTLE_CLI) {
+  const { execFileSync } = await import("child_process");
+  const tsxImport = resolve(__dirname, "..", "node_modules", "tsx", "dist", "esm", "index.mjs");
+  try {
+    execFileSync(process.execPath, ["--import", tsxImport, ...process.argv.slice(1)], {
+      stdio: "inherit",
+      env: { ...process.env, _CASTLE_CLI: "1" },
+    });
+  } catch (e) {
+    process.exit(e.status || 1);
+  }
+  process.exit(0);
+}
+
+const { program } = await import("commander");
+const pc = (await import("picocolors")).default;
+const { readFileSync } = await import("fs");
 let version = "0.0.0";
 try {
   version = JSON.parse(readFileSync(resolve(__dirname, "..", "package.json"), "utf-8")).version;
