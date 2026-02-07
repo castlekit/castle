@@ -650,8 +650,15 @@ main() {
             if [[ -n "$CASTLE_BIN" ]]; then
                 exec "$CASTLE_BIN" setup
             else
-                # Fallback: run via npx (always works, no PATH needed)
-                exec npx --yes @castlekit/castle setup
+                # Fallback: run the installed file directly (no PATH needed)
+                local pkg_dir
+                pkg_dir="$(npm prefix -g)/lib/node_modules/@castlekit/castle"
+                if [[ -f "$pkg_dir/bin/castle.js" ]]; then
+                    exec node --import tsx "$pkg_dir/bin/castle.js" setup
+                else
+                    echo -e "${WARN}→${NC} Could not locate castle binary."
+                    echo -e "Run ${INFO}castle setup${NC} manually."
+                fi
             fi
         else
             echo -e "${WARN}→${NC} No TTY available; skipping setup."
