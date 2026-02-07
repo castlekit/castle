@@ -148,10 +148,12 @@ class GatewayConnection extends EventEmitter {
     this.ws.on("open", () => {
       const connectId = randomUUID();
 
-      // Build the connect frame with device identity
-      const buildConnectFrame = (extra?: {
-        challengeNonce?: string;
-        challengeSignature?: string;
+      // Build the connect frame.
+      // The `device` field is ONLY included when responding to a connect.challenge,
+      // because the Gateway requires signature + signedAt when device is present.
+      const buildConnectFrame = (challenge?: {
+        nonce: string;
+        signature: string;
       }): RequestFrame => {
         const authPayload: Record<string, unknown> = { token };
         if (savedDeviceToken) {
@@ -174,19 +176,15 @@ class GatewayConnection extends EventEmitter {
           caps: [],
         };
 
-        // Include device identity if available
-        if (deviceIdentity) {
+        // Only include device when responding to a challenge (Gateway requires signature)
+        if (challenge && deviceIdentity) {
           params.device = {
             id: deviceIdentity.deviceId,
             publicKey: deviceIdentity.publicKey,
+            signature: challenge.signature,
+            nonce: challenge.nonce,
+            signedAt: Date.now(),
           };
-        }
-
-        // Include challenge response if we're responding to a connect.challenge
-        if (extra?.challengeNonce && extra?.challengeSignature) {
-          (params.device as Record<string, unknown>).signature = extra.challengeSignature;
-          (params.device as Record<string, unknown>).nonce = extra.challengeNonce;
-          (params.device as Record<string, unknown>).signedAt = Date.now();
         }
 
         return { type: "req", id: connectId, method: "connect", params };
@@ -197,22 +195,11 @@ class GatewayConnection extends EventEmitter {
         try {
           const msg = JSON.parse(data.toString());
 
-          // Handle connect.challenge — sign the nonce and re-send connect
+          // Handle connect.challenge — for now, skip device signing.
+          // Token-only auth works fine without responding to the challenge.
+          // Phase 2 will add device signing once Gateway pairing approval is ready.
           if (msg.type === "event" && msg.event === "connect.challenge") {
-            const nonce = msg.payload?.nonce;
-            if (nonce && typeof nonce === "string") {
-              console.log("[Gateway] Received connect.challenge — signing nonce");
-              try {
-                const signature = signChallenge(nonce);
-                const challengeFrame = buildConnectFrame({
-                  challengeNonce: nonce,
-                  challengeSignature: signature,
-                });
-                this.ws?.send(JSON.stringify(challengeFrame));
-              } catch (err) {
-                console.error("[Gateway] Failed to sign challenge:", err);
-              }
-            }
+            // Challenge acknowledged but not responded to — token auth continues
             return;
           }
 
