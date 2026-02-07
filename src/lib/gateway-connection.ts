@@ -2,6 +2,7 @@ import WebSocket from "ws";
 import { EventEmitter } from "events";
 import { randomUUID } from "crypto";
 import { getGatewayUrl, readOpenClawToken, readConfig, configExists } from "./config";
+import { getOrCreateIdentity, signChallenge, saveDeviceToken, getDeviceToken } from "./device-identity";
 
 // ============================================================================
 // Types
@@ -44,7 +45,7 @@ interface PendingRequest {
   timer: ReturnType<typeof setTimeout>;
 }
 
-export type ConnectionState = "disconnected" | "connecting" | "connected" | "error";
+export type ConnectionState = "disconnected" | "connecting" | "connected" | "pairing" | "error";
 
 export interface GatewayEvent {
   event: string;
@@ -132,14 +133,32 @@ class GatewayConnection extends EventEmitter {
       this.scheduleReconnect();
     }, this.connectTimeout);
 
+    // Load device identity for auth
+    let deviceIdentity: { deviceId: string; publicKey: string } | null = null;
+    try {
+      const identity = getOrCreateIdentity();
+      deviceIdentity = { deviceId: identity.deviceId, publicKey: identity.publicKey };
+    } catch (err) {
+      console.warn("[Gateway] Could not load device identity:", err);
+    }
+
+    // Check for a saved device token from previous pairing
+    const savedDeviceToken = getDeviceToken();
+
     this.ws.on("open", () => {
-      // Build connect handshake
       const connectId = randomUUID();
-      const connectFrame: RequestFrame = {
-        type: "req",
-        id: connectId,
-        method: "connect",
-        params: {
+
+      // Build the connect frame with device identity
+      const buildConnectFrame = (extra?: {
+        challengeNonce?: string;
+        challengeSignature?: string;
+      }): RequestFrame => {
+        const authPayload: Record<string, unknown> = { token };
+        if (savedDeviceToken) {
+          authPayload.deviceToken = savedDeviceToken;
+        }
+
+        const params: Record<string, unknown> = {
           minProtocol: 3,
           maxProtocol: 3,
           client: {
@@ -149,11 +168,28 @@ class GatewayConnection extends EventEmitter {
             platform: process.platform,
             mode: "backend",
           },
-          auth: { token },
+          auth: authPayload,
           role: "operator",
           scopes: ["operator.admin"],
           caps: [],
-        },
+        };
+
+        // Include device identity if available
+        if (deviceIdentity) {
+          params.device = {
+            id: deviceIdentity.deviceId,
+            publicKey: deviceIdentity.publicKey,
+          };
+        }
+
+        // Include challenge response if we're responding to a connect.challenge
+        if (extra?.challengeNonce && extra?.challengeSignature) {
+          (params.device as Record<string, unknown>).signature = extra.challengeSignature;
+          (params.device as Record<string, unknown>).nonce = extra.challengeNonce;
+          (params.device as Record<string, unknown>).signedAt = Date.now();
+        }
+
+        return { type: "req", id: connectId, method: "connect", params };
       };
 
       // Handle handshake messages (may include connect.challenge events)
@@ -161,10 +197,60 @@ class GatewayConnection extends EventEmitter {
         try {
           const msg = JSON.parse(data.toString());
 
-          // Handle connect.challenge event -- re-send connect with nonce
+          // Handle connect.challenge — sign the nonce and re-send connect
           if (msg.type === "event" && msg.event === "connect.challenge") {
-            // For now we don't support device-signed nonce challenges
-            // Just proceed with the connect
+            const nonce = msg.payload?.nonce;
+            if (nonce && typeof nonce === "string") {
+              console.log("[Gateway] Received connect.challenge — signing nonce");
+              try {
+                const signature = signChallenge(nonce);
+                const challengeFrame = buildConnectFrame({
+                  challengeNonce: nonce,
+                  challengeSignature: signature,
+                });
+                this.ws?.send(JSON.stringify(challengeFrame));
+              } catch (err) {
+                console.error("[Gateway] Failed to sign challenge:", err);
+              }
+            }
+            return;
+          }
+
+          // Handle device.pairing.required — Gateway wants operator approval
+          if (msg.type === "event" && msg.event === "device.pairing.required") {
+            console.log("[Gateway] Device pairing approval required");
+            console.log("[Gateway] Approve this device in your OpenClaw dashboard to continue...");
+            this._state = "pairing";
+            this.emit("stateChange", this._state);
+            this.emit("pairingRequired", msg.payload);
+            // Forward as a gateway event too
+            this.emit("gatewayEvent", {
+              event: msg.event,
+              payload: msg.payload,
+              seq: msg.seq,
+            } as GatewayEvent);
+            return;
+          }
+
+          // Handle device.pairing.approved — save the device token
+          if (msg.type === "event" && msg.event === "device.pairing.approved") {
+            const deviceToken = msg.payload?.deviceToken;
+            if (deviceToken && typeof deviceToken === "string") {
+              console.log("[Gateway] Device pairing approved — saving token");
+              try {
+                saveDeviceToken(deviceToken, url);
+              } catch (err) {
+                console.error("[Gateway] Failed to save device token:", err);
+              }
+            }
+            this.emit("pairingApproved", msg.payload);
+            // Forward as a gateway event too
+            this.emit("gatewayEvent", {
+              event: msg.event,
+              payload: msg.payload,
+              seq: msg.seq,
+            } as GatewayEvent);
+            // Don't return — the next message should be the connect response
             return;
           }
 
@@ -173,8 +259,18 @@ class GatewayConnection extends EventEmitter {
             clearTimeout(connectTimer);
 
             if (msg.ok) {
-              // hello-ok is embedded in the payload
               const helloOk = msg.payload || {};
+
+              // If hello-ok includes a deviceToken, save it
+              if (helloOk.deviceToken && typeof helloOk.deviceToken === "string") {
+                try {
+                  saveDeviceToken(helloOk.deviceToken, url);
+                  console.log("[Gateway] Device token received and saved");
+                } catch (err) {
+                  console.error("[Gateway] Failed to save device token:", err);
+                }
+              }
+
               this._state = "connected";
               this._serverInfo = helloOk.server || {};
               this._features = helloOk.features || {};
@@ -216,7 +312,7 @@ class GatewayConnection extends EventEmitter {
       };
 
       this.ws!.on("message", onHandshakeMessage);
-      this.ws!.send(JSON.stringify(connectFrame));
+      this.ws!.send(JSON.stringify(buildConnectFrame()));
     });
 
     this.ws.on("error", (err) => {
@@ -308,14 +404,19 @@ class GatewayConnection extends EventEmitter {
   // --------------------------------------------------------------------------
 
   private resolveToken(): string | null {
-    // 1. Castle config token
+    // 1. Saved device token from previous pairing
+    const deviceToken = getDeviceToken();
+    if (deviceToken) return deviceToken;
+
+    // 2. Castle config token
     if (configExists()) {
       const config = readConfig();
       if (config.openclaw.gateway_token) {
         return config.openclaw.gateway_token;
       }
     }
-    // 2. Auto-detect from OpenClaw config
+
+    // 3. Auto-detect from OpenClaw config
     return readOpenClawToken();
   }
 
@@ -335,7 +436,7 @@ class GatewayConnection extends EventEmitter {
       this.pending.delete(id);
     }
 
-    if (this._state !== "error") {
+    if (this._state !== "error" && this._state !== "pairing") {
       this._state = "disconnected";
       this.emit("stateChange", this._state);
     }

@@ -7,6 +7,8 @@ export interface CastleConfig {
   openclaw: {
     gateway_port: number;
     gateway_token?: string;
+    gateway_url?: string;   // Full WebSocket URL for remote Gateways (e.g. ws://192.168.1.50:18789)
+    is_remote?: boolean;    // True when connecting to a non-local Gateway
     primary_agent?: string;
   };
   server: {
@@ -177,13 +179,17 @@ export function readOpenClawPort(): number | null {
 
 /**
  * Get the Gateway WebSocket URL.
- * Supports OPENCLAW_GATEWAY_URL env var, falls back to config port.
+ * Priority: env var > config gateway_url > config port on localhost.
  */
 export function getGatewayUrl(): string {
   if (process.env.OPENCLAW_GATEWAY_URL) {
     return process.env.OPENCLAW_GATEWAY_URL;
   }
   const config = readConfig();
+  // Explicit URL takes priority (remote Gateways, Tailscale, etc.)
+  if (config.openclaw.gateway_url) {
+    return config.openclaw.gateway_url;
+  }
   return `ws://127.0.0.1:${config.openclaw.gateway_port}`;
 }
 
