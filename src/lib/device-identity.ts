@@ -161,6 +161,28 @@ export function getDeviceToken(): string | null {
 }
 
 /**
+ * Clear the saved device token without deleting the identity.
+ * Used when a device token is rejected (e.g. Gateway was reset).
+ * The device keypair is preserved so it can re-pair.
+ */
+export function clearDeviceToken(): void {
+  const devicePath = getDevicePath();
+  if (!existsSync(devicePath)) return;
+
+  try {
+    const raw = readFileSync(devicePath, "utf-8");
+    const identity = JSON.parse(raw) as DeviceIdentity;
+    delete identity.deviceToken;
+    delete identity.pairedAt;
+    delete identity.gatewayUrl;
+    persistIdentity(identity);
+    console.log("[Device] Cleared device token");
+  } catch {
+    // If we can't read/parse, nothing to clear
+  }
+}
+
+/**
  * Delete device identity entirely. Forces re-pairing on next connection.
  */
 export function resetIdentity(): boolean {

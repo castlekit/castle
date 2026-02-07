@@ -2,7 +2,7 @@ import WebSocket from "ws";
 import { EventEmitter } from "events";
 import { randomUUID } from "crypto";
 import { getGatewayUrl, readOpenClawToken, readConfig, configExists } from "./config";
-import { getOrCreateIdentity, signChallenge, saveDeviceToken, getDeviceToken } from "./device-identity";
+import { getOrCreateIdentity, signChallenge, saveDeviceToken, getDeviceToken, clearDeviceToken } from "./device-identity";
 
 // ============================================================================
 // Types
@@ -304,12 +304,30 @@ class GatewayConnection extends EventEmitter {
               this.ws?.off("message", onHandshakeMessage);
               this.ws?.on("message", this.onMessage.bind(this));
             } else {
+              const errCode = msg.error?.code;
               const errMsg = msg.error?.message || "Connect rejected";
               console.error(`[Gateway] Connect failed: ${errMsg}`);
               this.ws?.off("message", onHandshakeMessage);
               this.cleanup();
-              // Don't reconnect on auth errors
-              if (msg.error?.code === "auth_failed") {
+
+              if (errCode === "auth_failed") {
+                // If we were using a stale device token, clear it and retry
+                // with the gateway token instead
+                if (savedDeviceToken) {
+                  console.log("[Gateway] Device token rejected — clearing and retrying with gateway token");
+                  clearDeviceToken();
+                  this._skipDeviceAuth = false;
+                  this.reconnectAttempts = 0;
+                  this.scheduleReconnect();
+                } else {
+                  // Real auth failure — gateway token is invalid
+                  this._state = "error";
+                  this.emit("stateChange", this._state);
+                  this.emit("authError", msg.error);
+                }
+              } else if (errCode === "protocol_mismatch" || errCode === "protocol_unsupported") {
+                // Permanent failure — don't retry with the same protocol
+                console.error("[Gateway] Protocol version not supported by this Gateway");
                 this._state = "error";
                 this.emit("stateChange", this._state);
                 this.emit("authError", msg.error);
