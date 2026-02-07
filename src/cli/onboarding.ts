@@ -3,6 +3,9 @@ import pc from "picocolors";
 import { execSync } from "child_process";
 import { randomUUID } from "crypto";
 import WebSocket from "ws";
+import { readFileSync } from "fs";
+import { resolve as resolvePath, dirname } from "path";
+import { fileURLToPath } from "url";
 import {
   isOpenClawInstalled,
   readOpenClawToken,
@@ -11,6 +14,11 @@ import {
   writeConfig,
   type CastleConfig,
 } from "../lib/config.js";
+
+// Read version from package.json at the project root
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const PROJECT_ROOT = resolvePath(__dirname, "..", "..");
+const PKG_VERSION = JSON.parse(readFileSync(resolvePath(PROJECT_ROOT, "package.json"), "utf-8")).version as string;
 
 // Castle blue helpers using standard ANSI colors (universal terminal support)
 const BLUE = (s: string) => `\x1b[94m${s}\x1b[0m`;        // bright blue
@@ -21,7 +29,7 @@ const BLUE_DIM = (s: string) => `\x1b[34m${s}\x1b[0m`;    // standard blue (mute
 // Patch picocolors so @clack/prompts UI chrome (bars, dots, highlights) uses Castle blue
 // @clack/prompts imports picocolors as an object reference, so overriding methods here
 // changes the colors of all internal rendering (│ bars, ◆ dots, highlights, etc.)
-const _pc = pc as Record<string, unknown>;
+const _pc = pc as unknown as Record<string, unknown>;
 _pc.gray = BLUE_DIM;
 _pc.green = BLUE;
 _pc.greenBright = BLUE;
@@ -79,7 +87,7 @@ async function discoverAgents(port: number, token: string | null): Promise<Disco
           client: {
             id: "gateway-client",
             displayName: "Castle CLI",
-            version: "0.0.1",
+            version: PKG_VERSION,
             platform: process.platform,
             mode: "backend",
           },
@@ -135,72 +143,7 @@ async function discoverAgents(port: number, token: string | null): Promise<Disco
   });
 }
 
-const CASTLE_LINES = [
-  "                                  |>>>",
-  "                                  |",
-  "                    |>>>      _  _|_  _         |>>>",
-  "                    |        |;| |;| |;|        |",
-  "                _  _|_  _    \\.    .  /    _  _|_  _",
-  "               |;|_|;|_|;|    \\:. ,  /    |;|_|;|_|;|",
-  "               \\..      /    ||;   . |    \\.    .  /",
-  "                \\.  ,  /     ||:  .  |     \\:  .  /",
-  "                 ||:   |_   _ ||_ . _ | _   _||:   |",
-  "                 ||:  .|||_|;|_|;|_|;|_|;|_|;||:.  |",
-  "                 ||:   ||.    .     .      . ||:  .|",
-  "                 ||: . || .     . .   .  ,   ||:   |       \\,/",
-  "                 ||:   ||:  ,  _______   .   ||: , |            /`\\",
-  "                 ||:   || .   /+++++++\\    . ||:   |",
-  "                 ||:   ||.    |+++++++| .    ||: . |",
-  "              __ ||: . ||: ,  |+++++++|.  . _||_   |",
-  "     ____--`~    '--~~__|.    |+++++__|----~    ~`---,              ___",
-  "-~--~                   ~---__|,--~'                  ~~----_____-~'   `~----~~",
-];
-
-/**
- * Apply a blue-to-purple gradient across the castle banner lines.
- * Uses ANSI 256-color codes to smoothly transition from bright blue to magenta.
- */
-function gradientBanner(): string {
-  // ANSI 256 colour codes: blue → purple gradient
-  // 39=blue, 38=blue, 33=darkblue, 63=slateblue, 99=purple, 135=magenta, 141=violet, 177=orchid
-  const gradient = [27, 27, 33, 33, 63, 63, 99, 99, 135, 135, 141, 141, 177, 177, 177, 176, 176, 176];
-
-  return CASTLE_LINES.map((line, i) => {
-    const colorCode = gradient[Math.min(i, gradient.length - 1)];
-    return `\x1b[38;5;${colorCode}m${line}\x1b[0m`;
-  }).join("\n");
-}
-
-const CASTLE_ASCII = `
-${gradientBanner()}
-
-  ${BLUE_BOLD("Castle")} ${pc.dim("— The multi-agent workspace")}
-`;
-
-const TAGLINES = [
-  "Your kingdom awaits, sire.",
-  "The throne room is ready.",
-  "A fortress for your AI agents.",
-  "All hail the command center.",
-  "Knights of the round terminal.",
-  "Raise the drawbridge, lower the latency.",
-  "By royal decree, your agents are assembled.",
-  "The court is now in session.",
-  "From castle walls to API calls.",
-  "Forged in code, ruled by you.",
-  "Every king needs a castle.",
-  "Where agents serve and dragons compile.",
-  "The siege of busywork ends here.",
-  "Hear ye, hear ye — your agents await.",
-  "A castle built on open source bedrock.",
-];
-
-function pickTagline(): string {
-  return TAGLINES[Math.floor(Math.random() * TAGLINES.length)];
-}
-
 export async function runOnboarding(): Promise<void> {
-  console.clear();
 
   p.intro(BLUE_BOLD("Castle Setup"));
 
@@ -280,15 +223,16 @@ export async function runOnboarding(): Promise<void> {
     }
   } else {
     // Auto-detect token and agents in one go
+    const detectedPort = readOpenClawPort() || 18789;
     const token = readOpenClawToken();
-    const agents = await discoverAgents(18789, token);
+    const agents = await discoverAgents(detectedPort, token);
 
     openclawSpinner.stop(`\x1b[92m✔\x1b[0m OpenClaw detected`);
 
     if (agents.length > 0 && token) {
       p.log.message(
         [
-          `${pc.dim("—")} ${pc.dim(`Gateway running on port ${18789}`)}`,
+          `${pc.dim("—")} ${pc.dim(`Gateway running on port ${detectedPort}`)}`,
           `${pc.dim("—")} ${pc.dim("Auth token found")}`,
           `${pc.dim("—")} ${pc.dim(`${agents.length} agent${agents.length !== 1 ? "s" : ""} discovered: ${agents.map((a) => a.name).join(", ")}`)}`,
         ].join("\n")
@@ -402,13 +346,10 @@ export async function runOnboarding(): Promise<void> {
   serverSpinner.start("Building Castle...");
 
   const { spawn, execSync: execSyncChild } = await import("child_process");
-  const { resolve, dirname, join } = await import("path");
-  const { fileURLToPath } = await import("url");
-  const { writeFileSync: writeFile, mkdirSync: mkDir } = await import("fs");
+  const { join } = await import("path");
+  const { writeFileSync: writeFile, mkdirSync: mkDir, readFileSync: readF } = await import("fs");
   const { homedir: home } = await import("os");
 
-  // Resolve to the castle project root (src/cli/onboarding.ts -> ../../ -> project root)
-  const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
   const castleDir = join(home(), ".castle");
   const logsDir = join(castleDir, "logs");
   mkDir(logsDir, { recursive: true });
@@ -416,7 +357,7 @@ export async function runOnboarding(): Promise<void> {
   // Build for production
   try {
     execSyncChild("npm run build", {
-      cwd: projectRoot,
+      cwd: PROJECT_ROOT,
       stdio: "ignore",
       timeout: 120000,
     });
@@ -430,23 +371,46 @@ export async function runOnboarding(): Promise<void> {
 
   // Find node and next paths for the service
   const nodePath = process.execPath;
-  const nextBin = resolve(projectRoot, "node_modules", ".bin", "next");
+
+  // Locate next binary reliably (works for both local and global installs)
+  let nextBin: string;
+  try {
+    // npm bin gives the local node_modules/.bin directory
+    const binDir = execSyncChild("npm bin", { cwd: PROJECT_ROOT, encoding: "utf-8" }).trim();
+    nextBin = join(binDir, "next");
+  } catch {
+    // Fallback: try local node_modules directly
+    nextBin = join(PROJECT_ROOT, "node_modules", ".bin", "next");
+  }
+
+  // Castle port from config or default
+  const castlePort = String(config.server?.port || 3333);
 
   // Write PID file helper
   const pidFile = join(castleDir, "server.pid");
 
-  // Kill any existing Castle server
+  // Kill any existing Castle server and wait for it to release the port
   try {
-    const { readFileSync: readF } = await import("fs");
     const existingPid = parseInt(readF(pidFile, "utf-8").trim(), 10);
-    if (existingPid) process.kill(existingPid);
+    if (existingPid) {
+      process.kill(existingPid);
+      // Wait up to 3s for old process to die
+      for (let i = 0; i < 30; i++) {
+        try {
+          process.kill(existingPid, 0); // Test if alive
+          await new Promise((r) => setTimeout(r, 100));
+        } catch {
+          break; // Process is gone
+        }
+      }
+    }
   } catch {
     // No existing server or already dead
   }
 
   // Start production server
-  const server = spawn(nodePath, [nextBin, "start", "-p", "3333"], {
-    cwd: projectRoot,
+  const server = spawn(nodePath, [nextBin, "start", "-p", castlePort], {
+    cwd: PROJECT_ROOT,
     stdio: ["ignore", "ignore", "ignore"],
     detached: true,
   });
@@ -458,6 +422,9 @@ export async function runOnboarding(): Promise<void> {
   // Install as a persistent service (auto-start on login)
   if (process.platform === "darwin") {
     // macOS: LaunchAgent
+    // We unload first to avoid conflicts, then load. KeepAlive is set to
+    // SuccessfulExit=false so launchd only restarts on crashes, not when
+    // we intentionally stop it.
     const plistDir = join(home(), "Library", "LaunchAgents");
     mkDir(plistDir, { recursive: true });
     const plistPath = join(plistDir, "com.castlekit.castle.plist");
@@ -473,23 +440,42 @@ export async function runOnboarding(): Promise<void> {
         <string>${nextBin}</string>
         <string>start</string>
         <string>-p</string>
-        <string>3333</string>
+        <string>${castlePort}</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>${projectRoot}</string>
+    <string>${PROJECT_ROOT}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
-    <true/>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
     <key>StandardOutPath</key>
     <string>${logsDir}/server.log</string>
     <key>StandardErrorPath</key>
     <string>${logsDir}/server.err</string>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>NODE_ENV</key>
+        <string>production</string>
+        <key>PATH</key>
+        <string>${process.env.PATH}</string>
+    </dict>
 </dict>
 </plist>`;
+    // Stop any running instance first, then kill our manually spawned one
+    // so launchd takes over as the sole process manager
+    try {
+      execSyncChild(`launchctl unload "${plistPath}" 2>/dev/null`, { stdio: "ignore" });
+    } catch { /* ignore */ }
     writeFile(plistPath, plist);
     try {
-      execSyncChild(`launchctl unload "${plistPath}" 2>/dev/null; launchctl load "${plistPath}"`, { stdio: "ignore" });
+      // Kill the spawn()ed server — launchd will now be the owner
+      if (server.pid) {
+        try { process.kill(server.pid); } catch { /* already dead */ }
+      }
+      execSyncChild(`launchctl load "${plistPath}"`, { stdio: "ignore" });
     } catch {
       // Non-fatal: server is already running via spawn
     }
@@ -503,10 +489,12 @@ Description=Castle - The multi-agent workspace
 After=network.target
 
 [Service]
-ExecStart=${nodePath} ${nextBin} start -p 3333
-WorkingDirectory=${projectRoot}
-Restart=always
+ExecStart=${nodePath} ${nextBin} start -p ${castlePort}
+WorkingDirectory=${PROJECT_ROOT}
+Restart=on-failure
 RestartSec=5
+Environment=NODE_ENV=production
+Environment=PATH=${process.env.PATH}
 
 [Install]
 WantedBy=default.target
@@ -526,7 +514,7 @@ WantedBy=default.target
 
   while (Date.now() - startTime < maxWait) {
     try {
-      const res = await fetch("http://localhost:3333");
+      const res = await fetch(`http://localhost:${castlePort}`);
       if (res.ok || res.status === 404) {
         serverReady = true;
         break;
@@ -557,7 +545,7 @@ WantedBy=default.target
       `  ${pc.dim("Config")}          ${BLUE_LIGHT("~/.castle/castle.json")}`,
       `  ${pc.dim("Primary agent")}   ${BLUE_BOLD(primaryDisplay)}`,
       "",
-      `  ${BLUE_BOLD("➜")}  \x1b[1m\x1b[4m\x1b[94mhttp://localhost:3333\x1b[0m`,
+      `  ${BLUE_BOLD("➜")}  \x1b[1m\x1b[4m\x1b[94mhttp://localhost:${castlePort}\x1b[0m`,
       "",
       `  ${pc.dim("Your agents are ready. Let's go!")} 🚀`,
       "",
@@ -574,7 +562,7 @@ WantedBy=default.target
     return;
   }
 
-  p.outro(pc.dim(`Opening ${BLUE("http://localhost:3333")}...`));
+  p.outro(pc.dim(`Opening ${BLUE(`http://localhost:${castlePort}`)}...`));
   const open = (await import("open")).default;
-  await open("http://localhost:3333");
+  await open(`http://localhost:${castlePort}`);
 }
