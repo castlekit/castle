@@ -1,4 +1,4 @@
-#!/usr/bin/env -S npx tsx
+#!/usr/bin/env -S npx --yes tsx
 
 // Castle CLI - The multi-agent workspace
 // https://castlekit.com

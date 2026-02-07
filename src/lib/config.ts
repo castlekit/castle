@@ -151,6 +151,31 @@ export function readOpenClawToken(): string | null {
 }
 
 /**
+ * Try to read the OpenClaw gateway port from ~/.openclaw/openclaw.json
+ */
+export function readOpenClawPort(): number | null {
+  const paths = [
+    join(homedir(), ".openclaw", "openclaw.json"),
+    join(homedir(), ".openclaw", "openclaw.json5"),
+  ];
+
+  for (const p of paths) {
+    if (!existsSync(p)) continue;
+    try {
+      const raw = readFileSync(p, "utf-8");
+      const parsed = JSON5.parse(raw);
+      const port = parsed?.gateway?.port;
+      if (typeof port === "number" && port > 0 && port <= 65535) {
+        return port;
+      }
+    } catch {
+      // Continue
+    }
+  }
+  return null;
+}
+
+/**
  * Get the Gateway WebSocket URL.
  * Supports OPENCLAW_GATEWAY_URL env var, falls back to config port.
  */
