@@ -11,8 +11,9 @@ export const dynamic = "force-dynamic";
  */
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
-  const lines = parseInt(searchParams.get("lines") || "100", 10);
-  const file = searchParams.get("file") || "gateway";
+  const rawLines = parseInt(searchParams.get("lines") || "100", 10);
+  const lines = Math.min(Math.max(1, Number.isFinite(rawLines) ? rawLines : 100), 10000);
+  const file = searchParams.get("file")?.trim() || "gateway";
 
   const logsDir = join(getOpenClawDir(), "logs");
 

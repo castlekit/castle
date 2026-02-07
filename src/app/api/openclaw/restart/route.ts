@@ -26,13 +26,16 @@ export async function POST() {
 
     // Try stopping and starting via process signal
     try {
-      const pid = execSync("pgrep -f 'openclaw.*gateway'", {
+      const pids = execSync("pgrep -f 'openclaw.*gateway'", {
         timeout: 5000,
         stdio: "pipe",
       })
         .toString()
-        .trim();
+        .trim()
+        .split(/\s+/)
+        .filter((p) => /^\d+$/.test(p));
 
+      const pid = pids[0];
       if (pid) {
         execSync(`kill -HUP ${pid}`, { timeout: 5000, stdio: "pipe" });
         return NextResponse.json({

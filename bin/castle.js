@@ -5,11 +5,20 @@
 
 import { program } from "commander";
 import pc from "picocolors";
+import { readFileSync } from "fs";
+import { resolve, dirname } from "path";
+import { fileURLToPath } from "url";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+let version = "0.0.0";
+try {
+  version = JSON.parse(readFileSync(resolve(__dirname, "..", "package.json"), "utf-8")).version;
+} catch { /* fallback */ }
 
 program
   .name("castle")
   .description("The multi-agent workspace")
-  .version("0.0.1");
+  .version(version);
 
 program
   .command("setup")
@@ -23,8 +32,10 @@ program
   .command("open")
   .description("Open Castle in the browser")
   .action(async () => {
+    const { readConfig, configExists } = await import("../src/lib/config.ts");
     const open = (await import("open")).default;
-    const url = "http://localhost:3333";
+    const port = configExists() ? readConfig().server?.port || 3333 : 3333;
+    const url = `http://localhost:${port}`;
     console.log(pc.bold("\n  🏰 Castle\n"));
     console.log(`  Opening ${pc.cyan(url)}...\n`);
     await open(url);

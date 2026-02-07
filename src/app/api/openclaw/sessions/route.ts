@@ -22,7 +22,6 @@ export async function GET() {
     const sessions: Array<{
       agentId: string;
       sessionId: string;
-      file: string;
       sizeBytes: number;
       modifiedAt: string;
     }> = [];
@@ -44,7 +43,6 @@ export async function GET() {
         sessions.push({
           agentId: agentDir.name,
           sessionId: basename(file, ".jsonl"),
-          file: filePath,
           sizeBytes: stat.size,
           modifiedAt: stat.mtime.toISOString(),
         });

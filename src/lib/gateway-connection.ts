@@ -1,7 +1,7 @@
 import WebSocket from "ws";
 import { EventEmitter } from "events";
 import { randomUUID } from "crypto";
-import { getGatewayUrl, readOpenClawToken, readConfig, configExists, isOpenClawInstalled } from "./config";
+import { getGatewayUrl, readOpenClawToken, readConfig, configExists } from "./config";
 
 // ============================================================================
 // Types

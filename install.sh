@@ -182,6 +182,10 @@ parse_args() {
                 shift
                 ;;
             --version)
+                if [[ -z "${2:-}" ]]; then
+                    echo "Error: --version requires a value"
+                    exit 1
+                fi
                 CASTLE_VERSION="$2"
                 shift 2
                 ;;

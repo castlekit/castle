@@ -64,12 +64,21 @@ export async function PATCH(request: NextRequest) {
   }
 
   try {
-    const body = await request.json();
-    const { patch } = body;
-
-    if (!patch) {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
       return NextResponse.json(
-        { error: "Missing 'patch' field in request body" },
+        { error: "Invalid JSON in request body" },
+        { status: 400 }
+      );
+    }
+
+    const { patch } = body as { patch?: unknown };
+
+    if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
+      return NextResponse.json(
+        { error: "Missing or invalid 'patch' field — must be a JSON object" },
         { status: 400 }
       );
     }

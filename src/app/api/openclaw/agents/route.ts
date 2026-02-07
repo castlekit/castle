@@ -49,7 +49,12 @@ function rewriteAvatarUrl(url: string | null): string | null {
     return url;
   }
 
-  return url;
+  // Only allow http/https URLs through; reject file:, javascript:, etc.
+  if (url.startsWith("http://") || url.startsWith("https://")) {
+    return url;
+  }
+
+  return null;
 }
 
 /**

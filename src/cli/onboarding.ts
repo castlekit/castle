@@ -18,7 +18,12 @@ import {
 // Read version from package.json at the project root
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const PROJECT_ROOT = resolvePath(__dirname, "..", "..");
-const PKG_VERSION = JSON.parse(readFileSync(resolvePath(PROJECT_ROOT, "package.json"), "utf-8")).version as string;
+let PKG_VERSION = "0.0.0";
+try {
+  PKG_VERSION = JSON.parse(readFileSync(resolvePath(PROJECT_ROOT, "package.json"), "utf-8")).version;
+} catch {
+  // Fallback if package.json is missing or invalid
+}
 
 // Castle blue helpers using standard ANSI colors (universal terminal support)
 const BLUE = (s: string) => `\x1b[94m${s}\x1b[0m`;        // bright blue
@@ -128,7 +133,8 @@ async function discoverAgents(port: number, token: string | null): Promise<Disco
             clearTimeout(timeout);
             ws.close();
             const payload = msg.payload || {};
-            const agents = (payload.agents || []).map((a: { id: string; name?: string; identity?: { name?: string; theme?: string } }) => ({
+            const agentsList = Array.isArray(payload.agents) ? payload.agents : [];
+            const agents = agentsList.map((a: { id: string; name?: string; identity?: { name?: string; theme?: string } }) => ({
               id: a.id,
               name: a.identity?.name || a.name || a.id,
               description: a.identity?.theme || null,
@@ -392,7 +398,7 @@ export async function runOnboarding(): Promise<void> {
   // Kill any existing Castle server and wait for it to release the port
   try {
     const existingPid = parseInt(readF(pidFile, "utf-8").trim(), 10);
-    if (existingPid) {
+    if (Number.isInteger(existingPid) && existingPid > 0) {
       process.kill(existingPid);
       // Wait up to 3s for old process to die
       for (let i = 0; i < 30; i++) {
@@ -416,7 +422,9 @@ export async function runOnboarding(): Promise<void> {
   });
 
   // Write PID file so we can manage the server later
-  writeFile(pidFile, String(server.pid));
+  if (server.pid != null) {
+    writeFile(pidFile, String(server.pid));
+  }
   server.unref();
 
   // Install as a persistent service (auto-start on login)
