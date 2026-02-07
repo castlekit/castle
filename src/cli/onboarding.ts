@@ -201,8 +201,6 @@ function pickTagline(): string {
 
 export async function runOnboarding(): Promise<void> {
   console.clear();
-  console.log(CASTLE_ASCII);
-  console.log(pc.dim(`  ${pickTagline()}\n`));
 
   p.intro(BLUE_BOLD("Castle Setup"));
 
