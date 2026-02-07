@@ -1,17 +1,65 @@
 {
   "name": "@castlekit/castle",
   "version": "0.0.1",
-  "description": "The extensible kit for AI agents",
-  "main": "index.js",
+  "description": "The multi-agent workspace",
+  "type": "module",
+  "bin": {
+    "castle": "./bin/castle.js"
+  },
+  "scripts": {
+    "dev": "next dev -p 3333",
+    "build": "next build",
+    "start": "next start -p 3333",
+    "lint": "next lint"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/castlekit/castle.git"
   },
-  "keywords": ["ai", "agents", "openclaw", "multi-agent"],
+  "keywords": [
+    "ai",
+    "agents",
+    "openclaw",
+    "multi-agent",
+    "local-first"
+  ],
   "author": "Castle Kit Inc.",
   "license": "MIT",
   "bugs": {
     "url": "https://github.com/castlekit/castle/issues"
   },
-  "homepage": "https://github.com/castlekit/castle#readme"
+  "homepage": "https://castlekit.com",
+  "engines": {
+    "node": ">=22"
+  },
+  "dependencies": {
+    "@clack/prompts": "^1.0.0",
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "@radix-ui/react-slider": "^1.3.6",
+    "@tailwindcss/postcss": "^4.1.18",
+    "@types/node": "^25.2.1",
+    "@types/react": "^19.2.13",
+    "@types/react-dom": "^19.2.3",
+    "clsx": "^2.1.1",
+    "commander": "^14.0.3",
+    "json5": "^2.2.3",
+    "lucide-react": "^0.563.0",
+    "next": "^16.1.6",
+    "next-themes": "^0.4.6",
+    "open": "^11.0.0",
+    "picocolors": "^1.1.1",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "recharts": "^3.7.0",
+    "tailwind-merge": "^3.4.0",
+    "tailwindcss": "^4.1.18",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "ws": "^8.19.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.18.1"
+  }
 }

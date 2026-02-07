@@ -1,0 +1,286 @@
+@import "tailwindcss";
+
+/* ============================================
+   Castle Design System - Design Tokens
+   ============================================ */
+
+:root {
+  /* Typography */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+
+  /* Spacing (8px base) */
+  --spacing-1: 4px;
+  --spacing-2: 8px;
+  --spacing-3: 12px;
+  --spacing-4: 16px;
+  --spacing-6: 24px;
+  --spacing-8: 32px;
+  --spacing-12: 48px;
+  --spacing-16: 64px;
+  --spacing-24: 96px;
+
+  /* Border Radius */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+
+  /* Transitions */
+  --transition-fast: 150ms ease;
+  --transition-base: 200ms ease;
+  --transition-slow: 300ms ease;
+}
+
+/* Light Mode (default) */
+:root {
+  --background: #f8fafc;
+  --background-secondary: #f1f5f9;
+  --surface: #ffffff;
+  --surface-hover: #f8fafc;
+  --border: #e2e8f0;
+  --border-hover: #cbd5e1;
+  
+  --foreground: #0f172a;
+  --foreground-secondary: #475569;
+  --foreground-muted: #94a3b8;
+  
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-foreground: #ffffff;
+  
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --info: #3b82f6;
+  
+  /* Glass effect (light mode) */
+  --glass-bg: #ffffff7a;
+  --glass-border: #ffffff3d;
+  --glass-shadow: #0000000d;
+  
+  /* Input (light mode) */
+  --input-background: #ffffff;
+  --input-border: #e2e8f0;
+  --input-focus: #3b82f6;
+  
+  /* Logo */
+  --logo-color: #18181b;
+  
+  /* Dashboard container */
+  --dashboard-bg: #f1f5f9;
+  --dashboard-overlay: transparent;
+  --greeting-text: #000000;
+  --greeting-text-secondary: rgba(0, 0, 0, 0.7);
+  
+  /* Glass card background */
+  --glass-card-bg: rgba(255, 255, 255, 0.85);
+}
+
+/* Dark Mode */
+.dark, :root.dark, html.dark {
+  --background: #1a1a1f;
+  --background-secondary: #141418;
+  --surface: #222228;
+  --surface-hover: #2a2a30;
+  --border: #35353d;
+  --border-hover: #45454d;
+  
+  --foreground: #fafafa;
+  --foreground-secondary: #a1a1aa;
+  --foreground-muted: #71717a;
+  
+  --accent: #3b82f6;
+  --accent-hover: #60a5fa;
+  --accent-foreground: #ffffff;
+  
+  --success: #22c55e;
+  --warning: #f59e0b;
+  --error: #ef4444;
+  --info: #3b82f6;
+  
+  /* Glass effect (dark mode) */
+  --glass-bg: rgba(30, 30, 35, 0.7);
+  --glass-border: rgba(255, 255, 255, 0.1);
+  --glass-shadow: rgba(0, 0, 0, 0.3);
+  
+  /* Input (dark mode) */
+  --input-background: #141418;
+  --input-border: #35353d;
+  --input-focus: #3b82f6;
+  
+  /* Logo */
+  --logo-color: #e8e8ec;
+  
+  /* Dashboard container */
+  --dashboard-bg: #141418;
+  --dashboard-overlay: rgba(0, 0, 0, 0.5);
+  --greeting-text: #ffffff;
+  --greeting-text-secondary: rgba(255, 255, 255, 0.7);
+  
+  /* Glass card background */
+  --glass-card-bg: rgba(255, 255, 255, 0.05);
+}
+
+@theme inline {
+  /* Colors */
+  --color-background: var(--background);
+  --color-background-secondary: var(--background-secondary);
+  --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
+  --color-border: var(--border);
+  --color-border-hover: var(--border-hover);
+  
+  --color-foreground: var(--foreground);
+  --color-foreground-secondary: var(--foreground-secondary);
+  --color-foreground-muted: var(--foreground-muted);
+  
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-foreground: var(--accent-foreground);
+  
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-error: var(--error);
+  --color-info: var(--info);
+  
+  /* Input specific */
+  --color-input-background: var(--input-background);
+  --color-input-border: var(--input-border);
+  --color-input-focus: var(--input-focus);
+  
+  /* Typography */
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  
+  /* Border Radius */
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-full: var(--radius-full);
+}
+
+/* Base styles */
+html {
+  /* Prevent viewport scrollbar "blink" during hydration/layout settling */
+  overflow-y: scroll;
+  scrollbar-gutter: stable;
+  overscroll-behavior: none;
+}
+
+/* Hint native controls/scrollbars about theme */
+:root {
+  color-scheme: light;
+}
+.dark, :root.dark, html.dark {
+  color-scheme: dark;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Disable overscroll bounce effect */
+  overscroll-behavior: none;
+}
+
+/* ============================================
+   Reusable Component Patterns
+   ============================================ */
+
+/* Glass effect - frosted glass style for dashboard/ambient UI */
+.glass {
+  backdrop-filter: blur(3px);
+  border: 1px solid var(--glass-border);
+  background-color: var(--glass-bg);
+  box-shadow: 0 1px 2px var(--glass-shadow);
+}
+
+@layer utilities {
+  /* Focus ring - consistent focus state across interactive elements */
+  .focus-ring {
+    @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background;
+  }
+
+  /* Disabled state - consistent disabled styling */
+  .disabled-state {
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Label - consistent form label styling */
+  .form-label {
+    @apply block text-sm text-foreground-muted mb-2;
+  }
+}
+
+@layer components {
+  /* Interactive base - combines cursor, focus, and disabled */
+  .interactive {
+    @apply cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Input base - shared input/select/textarea styles */
+  .input-base {
+    @apply h-11 w-full rounded-[var(--radius-sm)] border px-3 py-2 text-sm text-foreground transition-all;
+    @apply bg-[var(--input-background)] border-[var(--input-border)];
+    @apply focus:outline-none focus:border-[var(--input-focus)];
+    @apply disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .input-base[aria-invalid="true"],
+  .input-base.error {
+    @apply border-error focus:border-error;
+  }
+}
+
+/* Scrollbar styling (global) */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--background-secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: var(--radius-full);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--border-hover);
+}
+
+/* Heart glow animation */
+@keyframes heart-glow {
+  0% {
+    transform: scale(1);
+    opacity: 0.6;
+  }
+  100% {
+    transform: scale(2.5);
+    opacity: 0;
+  }
+}
+
+/* Heart beat pulse animation */
+@keyframes heart-beat {
+  0% {
+    transform: scale(1);
+  }
+  25% {
+    transform: scale(1.3);
+  }
+  50% {
+    transform: scale(1);
+  }
+  75% {
+    transform: scale(1.15);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
