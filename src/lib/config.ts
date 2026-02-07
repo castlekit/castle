@@ -73,9 +73,60 @@ export function writeConfig(config: CastleConfig): void {
 }
 
 /**
+ * Load a .env file and set values into process.env (does not override existing)
+ */
+function loadEnvFile(envPath: string): void {
+  if (!existsSync(envPath)) return;
+  try {
+    const raw = readFileSync(envPath, "utf-8");
+    for (const line of raw.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const eqIdx = trimmed.indexOf("=");
+      if (eqIdx === -1) continue;
+      const key = trimmed.slice(0, eqIdx).trim();
+      let value = trimmed.slice(eqIdx + 1).trim();
+      // Strip surrounding quotes
+      if ((value.startsWith('"') && value.endsWith('"')) ||
+          (value.startsWith("'") && value.endsWith("'"))) {
+        value = value.slice(1, -1);
+      }
+      if (!process.env[key]) {
+        process.env[key] = value;
+      }
+    }
+  } catch {
+    // Ignore errors loading .env
+  }
+}
+
+/**
+ * Resolve ${ENV_VAR} references in a string value.
+ * Users often have "token": "${OPENCLAW_GATEWAY_TOKEN}" in their config.
+ */
+function resolveEnvVar(value: string): string | null {
+  if (value.startsWith("${") && value.endsWith("}")) {
+    const envVar = value.slice(2, -1);
+    return process.env[envVar] || null;
+  }
+  return value;
+}
+
+/**
+ * Get the OpenClaw directory path
+ */
+export function getOpenClawDir(): string {
+  return join(homedir(), ".openclaw");
+}
+
+/**
  * Try to read the OpenClaw gateway token from ~/.openclaw/openclaw.json
+ * Handles ${ENV_VAR} references and loads ~/.openclaw/.env
  */
 export function readOpenClawToken(): string | null {
+  // Load ~/.openclaw/.env first so env var references can resolve
+  loadEnvFile(join(getOpenClawDir(), ".env"));
+
   const paths = [
     join(homedir(), ".openclaw", "openclaw.json"),
     join(homedir(), ".openclaw", "openclaw.json5"),
@@ -88,13 +139,27 @@ export function readOpenClawToken(): string | null {
       const parsed = JSON5.parse(raw);
       const token = parsed?.gateway?.auth?.token;
       if (token && typeof token === "string") {
-        return token;
+        return resolveEnvVar(token);
       }
     } catch {
       // Continue to next path
     }
   }
-  return null;
+
+  // Fallback: check env vars directly
+  return process.env.OPENCLAW_GATEWAY_TOKEN || null;
+}
+
+/**
+ * Get the Gateway WebSocket URL.
+ * Supports OPENCLAW_GATEWAY_URL env var, falls back to config port.
+ */
+export function getGatewayUrl(): string {
+  if (process.env.OPENCLAW_GATEWAY_URL) {
+    return process.env.OPENCLAW_GATEWAY_URL;
+  }
+  const config = readConfig();
+  return `ws://127.0.0.1:${config.openclaw.gateway_port}`;
 }
 
 /**
