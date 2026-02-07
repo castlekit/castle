@@ -332,6 +332,9 @@ export async function runOnboarding(): Promise<void> {
   }
 
   // Step 5: Create Castle config
+  const serverSpinner = p.spinner();
+  serverSpinner.start("Saving configuration...");
+
   ensureCastleDir();
 
   const config: CastleConfig = {
@@ -346,12 +349,9 @@ export async function runOnboarding(): Promise<void> {
   };
 
   writeConfig(config);
+  serverSpinner.message("Building Castle...");
 
-  // Step 6: Build and start server as a persistent service
-  const serverSpinner = p.spinner();
-  serverSpinner.start("Building Castle...");
-
-  const { spawn, execSync: execSyncChild } = await import("child_process");
+  const { spawn, exec, execSync: execSyncChild } = await import("child_process");
   const { join } = await import("path");
   const { writeFileSync: writeFile, mkdirSync: mkDir, readFileSync: readF } = await import("fs");
   const { homedir: home } = await import("os");
@@ -360,14 +360,17 @@ export async function runOnboarding(): Promise<void> {
   const logsDir = join(castleDir, "logs");
   mkDir(logsDir, { recursive: true });
 
-  // Build for production
-  try {
-    execSyncChild("npm run build", {
+  // Build for production (async so the spinner can animate)
+  const buildOk = await new Promise<boolean>((resolve) => {
+    const child = exec("npm run build", {
       cwd: PROJECT_ROOT,
-      stdio: "ignore",
       timeout: 120000,
     });
-  } catch {
+    child.on("close", (code) => resolve(code === 0));
+    child.on("error", () => resolve(false));
+  });
+
+  if (!buildOk) {
     serverSpinner.stop(pc.red("Build failed"));
     p.outro(pc.dim(`Try running ${BLUE("npm run build")} manually in the castle directory.`));
     return;
