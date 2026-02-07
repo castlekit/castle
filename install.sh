@@ -556,11 +556,7 @@ install_castle() {
 
     # Check if this version is already installed
     local installed_version=""
-    installed_version="$(npm list -g @castlekit/castle --depth=0 --json 2>/dev/null | node -e "
-        let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>{
-            try{const j=JSON.parse(d);console.log(j.dependencies?.['@castlekit/castle']?.version||'')}catch{}
-        })
-    " 2>/dev/null || true)"
+    installed_version="$(npm list -g @castlekit/castle --depth=0 2>/dev/null | grep '@castlekit/castle@' | sed 's/.*@castlekit\/castle@//' | tr -d '[:space:]' || true)"
 
     if [[ -n "$resolved_version" && "$installed_version" == "$resolved_version" ]]; then
         echo -e "${SUCCESS}✓${NC} Castle ${INFO}${resolved_version}${NC} already installed"
@@ -599,9 +595,24 @@ main() {
 
     # Check for existing installation
     local is_upgrade=false
-    if [[ -n "$(type -P castle 2>/dev/null || true)" ]]; then
-        echo -e "${WARN}→${NC} Existing Castle installation detected"
+    local existing_bin=""
+    existing_bin="$(type -P castle 2>/dev/null || true)"
+    if [[ -n "$existing_bin" ]]; then
         is_upgrade=true
+
+        # Check if already fully set up with the latest version
+        local current_ver=""
+        current_ver="$(npm list -g @castlekit/castle --depth=0 2>/dev/null | grep '@castlekit/castle@' | sed 's/.*@castlekit\/castle@//' | tr -d '[:space:]' || true)"
+        local target_ver=""
+        target_ver="$(npm view "@castlekit/castle@${CASTLE_VERSION}" version 2>/dev/null || true)"
+
+        if [[ -n "$current_ver" && -n "$target_ver" && "$current_ver" == "$target_ver" && -f "$HOME/.castle/castle.json" ]]; then
+            echo -e "${SUCCESS}✓${NC} Castle ${INFO}${current_ver}${NC} already installed and configured"
+            echo -e "${MUTED}Nothing to do. Run ${INFO}castle setup${NC} to reconfigure.${NC}"
+            return 0
+        fi
+
+        echo -e "${WARN}→${NC} Existing Castle installation detected"
     fi
 
     # Step 1: Homebrew (macOS only)
