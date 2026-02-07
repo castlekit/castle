@@ -10,8 +10,8 @@ import { getCastleDir, ensureCastleDir } from "./config";
 
 export interface DeviceIdentity {
   deviceId: string;
-  publicKey: string;   // hex-encoded Ed25519 public key
-  privateKey: string;  // hex-encoded Ed25519 private key
+  publicKey: string;   // PEM-encoded Ed25519 public key
+  privateKey: string;  // PEM-encoded Ed25519 private key
   createdAt: string;   // ISO-8601
   deviceToken?: string;
   pairedAt?: string;   // ISO-8601
@@ -37,11 +37,37 @@ function getDevicePath(): string {
 }
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+/**
+ * Check if a stored key is PEM format (vs old hex format).
+ */
+function isPem(key: string): boolean {
+  return key.startsWith("-----BEGIN ");
+}
+
+/**
+ * Write identity to disk with restrictive permissions.
+ */
+function persistIdentity(identity: DeviceIdentity): void {
+  const devicePath = getDevicePath();
+  ensureCastleDir();
+  writeFileSync(devicePath, JSON.stringify(identity, null, 2), "utf-8");
+  try {
+    chmodSync(devicePath, 0o600);
+  } catch {
+    // chmod may not work on all platforms (Windows)
+  }
+}
+
+// ============================================================================
 // Core API
 // ============================================================================
 
 /**
  * Load existing device identity or generate a new Ed25519 keypair.
+ * Keys are stored in PEM format as required by the Gateway protocol.
  * Identity is persisted in ~/.castle/device.json with mode 0600.
  */
 export function getOrCreateIdentity(): DeviceIdentity {
@@ -53,6 +79,12 @@ export function getOrCreateIdentity(): DeviceIdentity {
       const raw = readFileSync(devicePath, "utf-8");
       const identity = JSON.parse(raw) as DeviceIdentity;
       if (identity.deviceId && identity.publicKey && identity.privateKey) {
+        // Auto-upgrade: if keys are in old hex/DER format, regenerate with PEM
+        if (!isPem(identity.publicKey)) {
+          console.log("[Device] Upgrading key format from hex to PEM — regenerating keypair");
+          // Keep the same deviceId but generate new PEM keys
+          return generateIdentity(identity.deviceId);
+        }
         return identity;
       }
     } catch {
@@ -60,28 +92,26 @@ export function getOrCreateIdentity(): DeviceIdentity {
     }
   }
 
-  // Generate new Ed25519 keypair
+  return generateIdentity();
+}
+
+/**
+ * Generate a new Ed25519 keypair and persist it.
+ */
+function generateIdentity(existingDeviceId?: string): DeviceIdentity {
   const { publicKey, privateKey } = generateKeyPairSync("ed25519", {
-    publicKeyEncoding: { type: "spki", format: "der" },
-    privateKeyEncoding: { type: "pkcs8", format: "der" },
+    publicKeyEncoding: { type: "spki", format: "pem" },
+    privateKeyEncoding: { type: "pkcs8", format: "pem" },
   });
 
   const identity: DeviceIdentity = {
-    deviceId: randomUUID(),
-    publicKey: publicKey.toString("hex"),
-    privateKey: privateKey.toString("hex"),
+    deviceId: existingDeviceId || randomUUID(),
+    publicKey: publicKey as unknown as string,
+    privateKey: privateKey as unknown as string,
     createdAt: new Date().toISOString(),
   };
 
-  // Persist with restrictive permissions
-  ensureCastleDir();
-  writeFileSync(devicePath, JSON.stringify(identity, null, 2), "utf-8");
-  try {
-    chmodSync(devicePath, 0o600);
-  } catch {
-    // chmod may not work on all platforms (Windows)
-  }
-
+  persistIdentity(identity);
   return identity;
 }
 
@@ -91,16 +121,13 @@ export function getOrCreateIdentity(): DeviceIdentity {
  */
 export function signChallenge(nonce: string): string {
   const identity = getOrCreateIdentity();
-  const privateKeyDer = Buffer.from(identity.privateKey, "hex");
 
-  // Reconstruct the private key object from DER
-  const privateKey = {
-    key: privateKeyDer,
-    format: "der" as const,
-    type: "pkcs8" as const,
-  };
-
-  const signature = sign(null, Buffer.from(nonce, "utf-8"), privateKey);
+  // Ed25519 doesn't use a digest algorithm (pass null)
+  const signature = sign(
+    null,
+    Buffer.from(nonce, "utf-8"),
+    identity.privateKey
+  );
   return signature.toString("base64");
 }
 
@@ -114,14 +141,7 @@ export function saveDeviceToken(token: string, gatewayUrl?: string): void {
   if (gatewayUrl) {
     identity.gatewayUrl = gatewayUrl;
   }
-
-  const devicePath = getDevicePath();
-  writeFileSync(devicePath, JSON.stringify(identity, null, 2), "utf-8");
-  try {
-    chmodSync(devicePath, 0o600);
-  } catch {
-    // chmod may not work on all platforms
-  }
+  persistIdentity(identity);
 }
 
 /**
@@ -163,9 +183,9 @@ export function getDeviceInfo(): DeviceInfo | null {
     const raw = readFileSync(devicePath, "utf-8");
     const identity = JSON.parse(raw) as DeviceIdentity;
 
-    // Create a fingerprint from the public key (first 16 chars of SHA-256)
+    // Create a fingerprint from the public key
     const fingerprint = createHash("sha256")
-      .update(Buffer.from(identity.publicKey, "hex"))
+      .update(identity.publicKey)
       .digest("hex")
       .slice(0, 16);
 

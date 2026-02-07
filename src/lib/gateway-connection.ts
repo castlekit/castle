@@ -70,6 +70,8 @@ class GatewayConnection extends EventEmitter {
   private _serverInfo: { version?: string; connId?: string } = {};
   private _features: { methods?: string[]; events?: string[] } = {};
   private shouldReconnect = true;
+  // Device auth: set to true after "device identity mismatch" to fall back to token-only
+  private _skipDeviceAuth = false;
 
   get state(): ConnectionState {
     return this._state;
@@ -95,6 +97,7 @@ class GatewayConnection extends EventEmitter {
   start(): void {
     if (this._state === "connecting" || this._state === "connected") return;
     this.shouldReconnect = true;
+    this._skipDeviceAuth = false; // Reset — try device auth on fresh start
     this.connect();
   }
 
@@ -133,13 +136,17 @@ class GatewayConnection extends EventEmitter {
       this.scheduleReconnect();
     }, this.connectTimeout);
 
-    // Load device identity for auth
+    // Load device identity for auth (skip if previously rejected)
     let deviceIdentity: { deviceId: string; publicKey: string } | null = null;
-    try {
-      const identity = getOrCreateIdentity();
-      deviceIdentity = { deviceId: identity.deviceId, publicKey: identity.publicKey };
-    } catch (err) {
-      console.warn("[Gateway] Could not load device identity:", err);
+    if (!this._skipDeviceAuth) {
+      try {
+        const identity = getOrCreateIdentity();
+        deviceIdentity = { deviceId: identity.deviceId, publicKey: identity.publicKey };
+      } catch (err) {
+        console.warn("[Gateway] Could not load device identity:", err);
+      }
+    } else {
+      console.log("[Gateway] Device auth disabled — using token-only");
     }
 
     // Check for a saved device token from previous pairing
@@ -148,16 +155,25 @@ class GatewayConnection extends EventEmitter {
     this.ws.on("open", () => {
       const connectId = randomUUID();
 
-      // Build the connect frame.
-      // The `device` field is ONLY included when responding to a connect.challenge,
-      // because the Gateway requires signature + signedAt when device is present.
+      // Build connect frame per Gateway protocol:
+      // - Initial connect: token-only (no device field)
+      // - Challenge response: include device { id, publicKey, signature, signedAt, nonce }
+      // - Reconnect with deviceToken: use deviceToken as auth.token
+      //
+      // The device field is ONLY sent when responding to connect.challenge,
+      // because the Gateway requires signature + signedAt whenever device is present.
+      let challengeReceived = false;
+
       const buildConnectFrame = (challenge?: {
         nonce: string;
         signature: string;
       }): RequestFrame => {
-        const authPayload: Record<string, unknown> = { token };
+        // Auth: use saved deviceToken on reconnect, otherwise gateway token
+        const authPayload: Record<string, unknown> = {};
         if (savedDeviceToken) {
-          authPayload.deviceToken = savedDeviceToken;
+          authPayload.token = savedDeviceToken;
+        } else {
+          authPayload.token = token;
         }
 
         const params: Record<string, unknown> = {
@@ -176,7 +192,7 @@ class GatewayConnection extends EventEmitter {
           caps: [],
         };
 
-        // Only include device when responding to a challenge (Gateway requires signature)
+        // Only include device when responding to a challenge (with signature)
         if (challenge && deviceIdentity) {
           params.device = {
             id: deviceIdentity.deviceId,
@@ -190,27 +206,38 @@ class GatewayConnection extends EventEmitter {
         return { type: "req", id: connectId, method: "connect", params };
       };
 
-      // Handle handshake messages (may include connect.challenge events)
+      // Handle handshake messages
       const onHandshakeMessage = (data: WebSocket.RawData) => {
         try {
           const msg = JSON.parse(data.toString());
 
-          // Handle connect.challenge — for now, skip device signing.
-          // Token-only auth works fine without responding to the challenge.
-          // Phase 2 will add device signing once Gateway pairing approval is ready.
+          // Handle connect.challenge — sign nonce and re-send connect with device identity
           if (msg.type === "event" && msg.event === "connect.challenge") {
-            // Challenge acknowledged but not responded to — token auth continues
+            const nonce = msg.payload?.nonce;
+            if (nonce && typeof nonce === "string" && deviceIdentity) {
+              challengeReceived = true;
+              console.log("[Gateway] Challenge received — signing with device key");
+              try {
+                const signature = signChallenge(nonce);
+                const challengeFrame = buildConnectFrame({ nonce, signature });
+                this.ws?.send(JSON.stringify(challengeFrame));
+              } catch (err) {
+                console.error("[Gateway] Failed to sign challenge:", err);
+                challengeReceived = false;
+              }
+            } else {
+              console.log("[Gateway] Challenge received but no device identity — skipping");
+            }
             return;
           }
 
-          // Handle device.pairing.required — Gateway wants operator approval
+          // Handle device.pairing.required — waiting for operator approval
           if (msg.type === "event" && msg.event === "device.pairing.required") {
             console.log("[Gateway] Device pairing approval required");
             console.log("[Gateway] Approve this device in your OpenClaw dashboard to continue...");
             this._state = "pairing";
             this.emit("stateChange", this._state);
             this.emit("pairingRequired", msg.payload);
-            // Forward as a gateway event too
             this.emit("gatewayEvent", {
               event: msg.event,
               payload: msg.payload,
@@ -221,37 +248,45 @@ class GatewayConnection extends EventEmitter {
 
           // Handle device.pairing.approved — save the device token
           if (msg.type === "event" && msg.event === "device.pairing.approved") {
-            const deviceToken = msg.payload?.deviceToken;
-            if (deviceToken && typeof deviceToken === "string") {
+            const approvedToken = msg.payload?.deviceToken;
+            if (approvedToken && typeof approvedToken === "string") {
               console.log("[Gateway] Device pairing approved — saving token");
               try {
-                saveDeviceToken(deviceToken, url);
+                saveDeviceToken(approvedToken, url);
               } catch (err) {
                 console.error("[Gateway] Failed to save device token:", err);
               }
             }
             this.emit("pairingApproved", msg.payload);
-            // Forward as a gateway event too
             this.emit("gatewayEvent", {
               event: msg.event,
               payload: msg.payload,
               seq: msg.seq,
             } as GatewayEvent);
-            // Don't return — the next message should be the connect response
             return;
           }
 
-          // Standard response frame to our connect request
+          // Standard response to our connect request
           if (msg.type === "res" && msg.id === connectId) {
+            // If we already sent a challenge response, ignore error from the
+            // initial (token-only) connect — the signed response is in flight.
+            if (!msg.ok && challengeReceived) {
+              console.log("[Gateway] Ignoring error from initial connect — challenge response pending");
+              return;
+            }
+
             clearTimeout(connectTimer);
 
             if (msg.ok) {
               const helloOk = msg.payload || {};
 
-              // If hello-ok includes a deviceToken, save it
-              if (helloOk.deviceToken && typeof helloOk.deviceToken === "string") {
+              // Save deviceToken from hello-ok (may be at payload.auth.deviceToken
+              // or payload.deviceToken depending on Gateway version)
+              const helloDeviceToken =
+                helloOk.auth?.deviceToken || helloOk.deviceToken;
+              if (helloDeviceToken && typeof helloDeviceToken === "string") {
                 try {
-                  saveDeviceToken(helloOk.deviceToken, url);
+                  saveDeviceToken(helloDeviceToken, url);
                   console.log("[Gateway] Device token received and saved");
                 } catch (err) {
                   console.error("[Gateway] Failed to save device token:", err);
@@ -285,7 +320,7 @@ class GatewayConnection extends EventEmitter {
             return;
           }
 
-          // Forward any events that arrive during handshake
+          // Forward any other events during handshake
           if (msg.type === "event") {
             this.emit("gatewayEvent", {
               event: msg.event,
@@ -312,9 +347,20 @@ class GatewayConnection extends EventEmitter {
     this.ws.on("close", (code, reason) => {
       clearTimeout(connectTimer);
       const wasConnected = this._state === "connected";
+      const reasonStr = reason?.toString() || "none";
       this.cleanup();
+
+      // If Gateway rejected device identity, retry without it (class-level flag persists)
+      if (code === 1008 && reasonStr.includes("device identity mismatch") && !this._skipDeviceAuth) {
+        console.log("[Gateway] Device identity not recognized — retrying with token-only auth");
+        this._skipDeviceAuth = true;
+        this.reconnectAttempts = 0;
+        this.scheduleReconnect();
+        return;
+      }
+
       if (wasConnected) {
-        console.log(`[Gateway] Disconnected (code: ${code}, reason: ${reason?.toString() || "none"})`);
+        console.log(`[Gateway] Disconnected (code: ${code}, reason: ${reasonStr})`);
       }
       this.scheduleReconnect();
     });
