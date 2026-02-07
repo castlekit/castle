@@ -1,6 +1,7 @@
 import { generateKeyPairSync, sign, createHash } from "crypto";
 import { readFileSync, writeFileSync, existsSync, unlinkSync, chmodSync } from "fs";
 import { join } from "path";
+import { platform } from "os";
 import { randomUUID } from "crypto";
 import { getCastleDir, ensureCastleDir } from "./config";
 
@@ -50,14 +51,26 @@ function isPem(key: string): boolean {
 /**
  * Write identity to disk with restrictive permissions.
  */
+let _windowsPermWarnShown = false;
+
 function persistIdentity(identity: DeviceIdentity): void {
   const devicePath = getDevicePath();
   ensureCastleDir();
   writeFileSync(devicePath, JSON.stringify(identity, null, 2), "utf-8");
-  try {
-    chmodSync(devicePath, 0o600);
-  } catch {
-    // chmod may not work on all platforms (Windows)
+
+  if (platform() === "win32") {
+    // chmod is a no-op on Windows — warn once
+    if (!_windowsPermWarnShown) {
+      console.warn("[Device] Warning: On Windows, device.json file permissions cannot be restricted.");
+      console.warn("[Device] Keep your user account secure to protect your device private key.");
+      _windowsPermWarnShown = true;
+    }
+  } else {
+    try {
+      chmodSync(devicePath, 0o600);
+    } catch {
+      // Ignore — may fail on some filesystems
+    }
   }
 }
 

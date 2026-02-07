@@ -54,6 +54,21 @@ export interface GatewayEvent {
 }
 
 // ============================================================================
+// Helpers
+// ============================================================================
+
+const MAX_MESSAGE_SIZE = 10 * 1024 * 1024; // 10MB
+const MAX_NONCE_LENGTH = 1024;
+
+/** Strip tokens and key material from strings before logging. */
+function sanitize(str: string): string {
+  return str
+    .replace(/rew_[a-f0-9]+/gi, "rew_***")
+    .replace(/-----BEGIN [A-Z ]+-----[\s\S]*?-----END [A-Z ]+-----/g, "[REDACTED KEY]")
+    .replace(/[a-f0-9]{32,}/gi, (m) => m.slice(0, 8) + "***");
+}
+
+// ============================================================================
 // Singleton Gateway Connection
 // ============================================================================
 
@@ -208,12 +223,21 @@ class GatewayConnection extends EventEmitter {
 
       // Handle handshake messages
       const onHandshakeMessage = (data: WebSocket.RawData) => {
+        const rawSize = Buffer.isBuffer(data) ? data.length : Buffer.byteLength(data.toString());
+        if (rawSize > MAX_MESSAGE_SIZE) {
+          console.error(`[Gateway] Message too large (${rawSize} bytes) — ignoring`);
+          return;
+        }
         try {
           const msg = JSON.parse(data.toString());
 
           // Handle connect.challenge — sign nonce and re-send connect with device identity
           if (msg.type === "event" && msg.event === "connect.challenge") {
             const nonce = msg.payload?.nonce;
+            if (nonce && typeof nonce === "string" && nonce.length > MAX_NONCE_LENGTH) {
+              console.error(`[Gateway] Challenge nonce too large (${nonce.length} bytes) — rejecting`);
+              return;
+            }
             if (nonce && typeof nonce === "string" && deviceIdentity) {
               challengeReceived = true;
               console.log("[Gateway] Challenge received — signing with device key");
@@ -222,7 +246,7 @@ class GatewayConnection extends EventEmitter {
                 const challengeFrame = buildConnectFrame({ nonce, signature });
                 this.ws?.send(JSON.stringify(challengeFrame));
               } catch (err) {
-                console.error("[Gateway] Failed to sign challenge:", err);
+                console.error("[Gateway] Failed to sign challenge:", (err as Error).message);
                 challengeReceived = false;
               }
             } else {
@@ -306,7 +330,7 @@ class GatewayConnection extends EventEmitter {
             } else {
               const errCode = msg.error?.code;
               const errMsg = msg.error?.message || "Connect rejected";
-              console.error(`[Gateway] Connect failed: ${errMsg}`);
+              console.error(`[Gateway] Connect failed: ${sanitize(errMsg)}`);
               this.ws?.off("message", onHandshakeMessage);
               this.cleanup();
 
@@ -355,6 +379,19 @@ class GatewayConnection extends EventEmitter {
       this.ws!.send(JSON.stringify(buildConnectFrame()));
     });
 
+    // Handle WebSocket upgrade failures (e.g. corporate proxies blocking WS)
+    this.ws.on("unexpected-response", (_req, res) => {
+      clearTimeout(connectTimer);
+      console.error(`[Gateway] WebSocket upgrade failed (HTTP ${res.statusCode})`);
+      if (res.statusCode === 401 || res.statusCode === 403) {
+        console.error("[Gateway] Authentication rejected at HTTP level");
+      } else if (res.statusCode === 502 || res.statusCode === 503) {
+        console.error("[Gateway] Gateway may be behind a reverse proxy that doesn't support WebSocket");
+      }
+      this.cleanup();
+      this.scheduleReconnect();
+    });
+
     this.ws.on("error", (err) => {
       clearTimeout(connectTimer);
       console.error("[Gateway] WebSocket error:", err.message);
@@ -385,6 +422,11 @@ class GatewayConnection extends EventEmitter {
   }
 
   private onMessage(data: WebSocket.RawData): void {
+    const rawSize = Buffer.isBuffer(data) ? data.length : Buffer.byteLength(data.toString());
+    if (rawSize > MAX_MESSAGE_SIZE) {
+      console.error(`[Gateway] Message too large (${rawSize} bytes) — ignoring`);
+      return;
+    }
     let msg: GatewayFrame;
     try {
       msg = JSON.parse(data.toString());
