@@ -28,6 +28,22 @@ npm run dev
 
 Then open [http://localhost:3333](http://localhost:3333).
 
+## Releasing
+
+```bash
+# 1. Bump version
+npm version patch --no-git-tag-version
+
+# 2. Commit and push
+git add -A && git commit -m "Release vX.Y.Z" && git push
+
+# 3. Publish to npm (requires 2FA)
+npm publish --access public
+
+# 4. Tag the release
+git tag vX.Y.Z && git push origin vX.Y.Z
+```
+
 ## Requirements
 
 - Node.js >= 22
