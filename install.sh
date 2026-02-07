@@ -455,9 +455,35 @@ maybe_nodenv_rehash() {
     fi
 }
 
+source_node_version_manager() {
+    # Source nvm if available (curl|bash subshells don't have it loaded)
+    if [[ -z "${NVM_DIR:-}" ]]; then
+        if [[ -d "$HOME/.nvm" ]]; then
+            export NVM_DIR="$HOME/.nvm"
+        fi
+    fi
+    if [[ -n "${NVM_DIR:-}" && -s "${NVM_DIR}/nvm.sh" ]]; then
+        source "${NVM_DIR}/nvm.sh" 2>/dev/null || true
+    fi
+
+    # Source fnm if available
+    if command -v fnm &> /dev/null; then
+        eval "$(fnm env 2>/dev/null)" || true
+    fi
+}
+
 resolve_castle_bin() {
     refresh_shell_command_cache
     local resolved=""
+    resolved="$(type -P castle 2>/dev/null || true)"
+    if [[ -n "$resolved" && -x "$resolved" ]]; then
+        echo "$resolved"
+        return 0
+    fi
+
+    # Source nvm/fnm in case we're in a curl|bash subshell
+    source_node_version_manager
+    refresh_shell_command_cache
     resolved="$(type -P castle 2>/dev/null || true)"
     if [[ -n "$resolved" && -x "$resolved" ]]; then
         echo "$resolved"
@@ -478,6 +504,20 @@ resolve_castle_bin() {
         echo "${npm_bin}/castle"
         return 0
     fi
+
+    # Brute force: check common global bin locations
+    local common_paths=(
+        "$HOME/.nvm/versions/node/$(node -v 2>/dev/null || echo v0)/bin/castle"
+        "$HOME/.npm-global/bin/castle"
+        "/usr/local/bin/castle"
+        "/opt/homebrew/bin/castle"
+    )
+    for p in "${common_paths[@]}"; do
+        if [[ -x "$p" ]]; then
+            echo "$p"
+            return 0
+        fi
+    done
 
     maybe_nodenv_rehash
     refresh_shell_command_cache
@@ -567,11 +607,6 @@ main() {
 
     CASTLE_BIN="$(resolve_castle_bin || true)"
 
-    # PATH warning
-    local npm_bin=""
-    npm_bin="$(npm_global_bin_dir || true)"
-    warn_shell_path_missing_dir "$npm_bin" "npm global bin dir"
-
     echo ""
     echo -e "${SUCCESS}${BOLD}🏰 Castle installed successfully!${NC}"
 
@@ -604,18 +639,16 @@ main() {
     if [[ "$NO_ONBOARD" == "1" ]]; then
         echo -e "Skipping setup (requested). Run ${INFO}castle setup${NC} later."
     else
-        if [[ -z "$CASTLE_BIN" ]]; then
-            echo -e "${WARN}→${NC} Skipping setup: ${INFO}castle${NC} not on PATH yet."
-            warn_castle_not_found
-            echo -e "\nOnce PATH is fixed, run: ${INFO}castle setup${NC}"
-            return 0
-        fi
-
         if [[ -r /dev/tty && -w /dev/tty ]]; then
             echo -e "Starting setup..."
             echo ""
             exec </dev/tty
-            exec "$CASTLE_BIN" setup
+            if [[ -n "$CASTLE_BIN" ]]; then
+                exec "$CASTLE_BIN" setup
+            else
+                # Fallback: run via npx (always works, no PATH needed)
+                exec npx --yes @castlekit/castle setup
+            fi
         else
             echo -e "${WARN}→${NC} No TTY available; skipping setup."
             echo -e "Run ${INFO}castle setup${NC} later."
