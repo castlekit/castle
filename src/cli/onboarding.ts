@@ -96,8 +96,9 @@ async function discoverAgents(
       try {
         const identity = getOrCreateIdentity();
         deviceParams = { id: identity.deviceId, publicKey: identity.publicKey };
-      } catch {
+      } catch (err) {
         // Device identity not available yet — proceed without
+        console.debug("[Device] Could not load identity:", (err as Error).message);
       }
 
       // Send connect handshake
@@ -151,8 +152,8 @@ async function discoverAgents(
                   },
                 };
                 ws.send(JSON.stringify(challengeFrame));
-              } catch {
-                // Could not sign — proceed and let it fail gracefully
+              } catch (err) {
+                console.debug("[Device] Challenge signing failed:", (err as Error).message);
               }
             }
             return;
@@ -172,8 +173,8 @@ async function discoverAgents(
             if (helloOk.deviceToken && typeof helloOk.deviceToken === "string") {
               try {
                 persistDeviceToken(helloOk.deviceToken, wsUrl);
-              } catch {
-                // Non-fatal
+              } catch (err) {
+                console.debug("[Device] Failed to save device token:", (err as Error).message);
               }
             }
 
