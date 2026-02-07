@@ -397,23 +397,127 @@ export async function runOnboarding(): Promise<void> {
 
   writeConfig(config);
 
-  // Step 6: Start server before showing summary
+  // Step 6: Build and start server as a persistent service
   const serverSpinner = p.spinner();
-  serverSpinner.start("Starting Castle...");
+  serverSpinner.start("Building Castle...");
 
-  const { spawn } = await import("child_process");
-  const { resolve, dirname } = await import("path");
+  const { spawn, execSync: execSyncChild } = await import("child_process");
+  const { resolve, dirname, join } = await import("path");
   const { fileURLToPath } = await import("url");
+  const { writeFileSync: writeFile, mkdirSync: mkDir } = await import("fs");
+  const { homedir: home } = await import("os");
 
   // Resolve to the castle project root (src/cli/onboarding.ts -> ../../ -> project root)
   const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
+  const castleDir = join(home(), ".castle");
+  const logsDir = join(castleDir, "logs");
+  mkDir(logsDir, { recursive: true });
 
-  const server = spawn("npm", ["run", "dev"], {
+  // Build for production
+  try {
+    execSyncChild("npm run build", {
+      cwd: projectRoot,
+      stdio: "ignore",
+      timeout: 120000,
+    });
+  } catch {
+    serverSpinner.stop(pc.red("Build failed"));
+    p.outro(pc.dim(`Try running ${BLUE("npm run build")} manually in the castle directory.`));
+    return;
+  }
+
+  serverSpinner.message("Starting Castle...");
+
+  // Find node and next paths for the service
+  const nodePath = process.execPath;
+  const nextBin = resolve(projectRoot, "node_modules", ".bin", "next");
+
+  // Write PID file helper
+  const pidFile = join(castleDir, "server.pid");
+
+  // Kill any existing Castle server
+  try {
+    const { readFileSync: readF } = await import("fs");
+    const existingPid = parseInt(readF(pidFile, "utf-8").trim(), 10);
+    if (existingPid) process.kill(existingPid);
+  } catch {
+    // No existing server or already dead
+  }
+
+  // Start production server
+  const server = spawn(nodePath, [nextBin, "start", "-p", "3333"], {
     cwd: projectRoot,
-    stdio: "ignore",
+    stdio: ["ignore", "ignore", "ignore"],
     detached: true,
   });
+
+  // Write PID file so we can manage the server later
+  writeFile(pidFile, String(server.pid));
   server.unref();
+
+  // Install as a persistent service (auto-start on login)
+  if (process.platform === "darwin") {
+    // macOS: LaunchAgent
+    const plistDir = join(home(), "Library", "LaunchAgents");
+    mkDir(plistDir, { recursive: true });
+    const plistPath = join(plistDir, "com.castlekit.castle.plist");
+    const plist = `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.castlekit.castle</string>
+    <key>ProgramArguments</key>
+    <array>
+        <string>${nodePath}</string>
+        <string>${nextBin}</string>
+        <string>start</string>
+        <string>-p</string>
+        <string>3333</string>
+    </array>
+    <key>WorkingDirectory</key>
+    <string>${projectRoot}</string>
+    <key>RunAtLoad</key>
+    <true/>
+    <key>KeepAlive</key>
+    <true/>
+    <key>StandardOutPath</key>
+    <string>${logsDir}/server.log</string>
+    <key>StandardErrorPath</key>
+    <string>${logsDir}/server.err</string>
+</dict>
+</plist>`;
+    writeFile(plistPath, plist);
+    try {
+      execSyncChild(`launchctl unload "${plistPath}" 2>/dev/null; launchctl load "${plistPath}"`, { stdio: "ignore" });
+    } catch {
+      // Non-fatal: server is already running via spawn
+    }
+  } else if (process.platform === "linux") {
+    // Linux: systemd user service
+    const systemdDir = join(home(), ".config", "systemd", "user");
+    mkDir(systemdDir, { recursive: true });
+    const servicePath = join(systemdDir, "castle.service");
+    const service = `[Unit]
+Description=Castle - The multi-agent workspace
+After=network.target
+
+[Service]
+ExecStart=${nodePath} ${nextBin} start -p 3333
+WorkingDirectory=${projectRoot}
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+`;
+    writeFile(servicePath, service);
+    try {
+      execSyncChild("systemctl --user daemon-reload && systemctl --user enable --now castle.service", { stdio: "ignore" });
+    } catch {
+      // Non-fatal: server is already running via spawn
+    }
+  }
 
   // Wait for server to be ready
   const maxWait = 30000;
@@ -435,7 +539,7 @@ export async function runOnboarding(): Promise<void> {
 
   if (!serverReady) {
     serverSpinner.stop(pc.red("Server took too long to start"));
-    p.outro(pc.dim(`Try running ${BLUE("npm run dev")} manually, then ${BLUE("castle open")}`));
+    p.outro(pc.dim(`Check logs at ${BLUE("~/.castle/logs/")}`));
     return;
   }
 
