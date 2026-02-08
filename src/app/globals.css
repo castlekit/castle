@@ -221,6 +221,21 @@ body {
     @apply cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50;
   }
 
+  /* Panel — standard container style matching dashboard cards (bg-surface, bordered, rounded).
+     Use for sidebars, floating panels, content sections. */
+  .panel {
+    @apply rounded-[var(--radius-md)] bg-surface border border-border;
+  }
+
+  /* Selectable list — compact spacing for checkbox/radio lists, nav lists, etc.
+     Apply .selectable-list to the container; .selectable-list-item to each row. */
+  .selectable-list {
+    @apply space-y-0.5;
+  }
+  .selectable-list-item {
+    @apply flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-surface-hover cursor-pointer text-sm;
+  }
+
   /* Input base - shared input/select/textarea styles */
   .input-base {
     @apply h-11 w-full rounded-[var(--radius-sm)] border px-3 py-2 text-sm text-foreground transition-all;

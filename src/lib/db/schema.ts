@@ -10,6 +10,7 @@ export const channels = sqliteTable("channels", {
   defaultAgentId: text("default_agent_id").notNull(),
   createdAt: integer("created_at").notNull(), // unix ms
   updatedAt: integer("updated_at"),           // unix ms
+  lastAccessedAt: integer("last_accessed_at"), // unix ms — last time user opened this channel
 });
 
 // ============================================================================

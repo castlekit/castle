@@ -6,6 +6,8 @@ import {
   getChannel,
   updateChannel,
   deleteChannel,
+  touchChannel,
+  getLastAccessedChannelId,
 } from "@/lib/db/queries";
 
 const MAX_CHANNEL_NAME_LENGTH = 100;
@@ -25,8 +27,16 @@ function isValidAgentId(id: string): boolean {
 // GET /api/openclaw/chat/channels — List channels
 // ============================================================================
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const { searchParams } = new URL(request.url);
+
   try {
+    // GET /api/openclaw/chat/channels?last=1 — get last accessed channel ID
+    if (searchParams.get("last")) {
+      const lastId = getLastAccessedChannelId();
+      return NextResponse.json({ channelId: lastId });
+    }
+
     const all = getChannels();
     return NextResponse.json({ channels: all });
   } catch (err) {
@@ -47,7 +57,7 @@ export async function POST(request: NextRequest) {
   if (csrf) return csrf;
 
   let body: {
-    action?: "create" | "update" | "delete";
+    action?: "create" | "update" | "delete" | "touch";
     id?: string;
     name?: string;
     defaultAgentId?: string;
@@ -61,6 +71,15 @@ export async function POST(request: NextRequest) {
   }
 
   const action = body.action || "create";
+
+  // ------ TOUCH (mark as last accessed) ------
+  if (action === "touch") {
+    if (!body.id) {
+      return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+    touchChannel(body.id);
+    return NextResponse.json({ ok: true });
+  }
 
   // ------ DELETE ------
   if (action === "delete") {

@@ -1,10 +1,15 @@
 "use client";
 
+import { useState } from "react";
+import { Plus } from "lucide-react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { UserMenu } from "@/components/layout/user-menu";
 import { ChannelList } from "@/components/chat/channel-list";
+import { CreateChannelDialog } from "@/components/chat/create-channel-dialog";
 import { StorageIndicator } from "@/components/chat/storage-indicator";
-import { useParams } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { useParams, useRouter } from "next/navigation";
+import type { Channel } from "@/lib/types/chat";
 
 export default function ChatLayout({
   children,
@@ -12,7 +17,14 @@ export default function ChatLayout({
   children: React.ReactNode;
 }) {
   const params = useParams();
+  const router = useRouter();
   const channelId = params?.channelId as string | undefined;
+  const [showCreate, setShowCreate] = useState(false);
+
+  const handleChannelCreated = (channel: Channel) => {
+    setShowCreate(false);
+    router.push(`/chat/${channel.id}`);
+  };
 
   return (
     <div className="h-screen overflow-hidden bg-background">
@@ -20,16 +32,33 @@ export default function ChatLayout({
       <UserMenu className="fixed top-5 right-6 z-50" variant="solid" />
 
       <div className="h-screen ml-[80px] flex">
-        {/* Channel sidebar — fixed, scrolls independently */}
-        <div className="w-[260px] border-r border-border flex flex-col bg-surface/50 shrink-0">
-          <div className="p-4 border-b border-border shrink-0">
-            <h2 className="text-sm font-semibold text-foreground">Chat</h2>
-          </div>
-          <div className="flex-1 overflow-y-auto p-3">
-            <ChannelList activeChannelId={channelId} />
-          </div>
-          <div className="shrink-0">
-            <StorageIndicator />
+        {/* Channel sidebar — floating glass panel */}
+        <div className="w-[290px] shrink-0 py-5 px-[25px]">
+          <div className="h-full panel flex flex-col">
+            <div className="px-4 pt-4 pb-2 flex items-center justify-between shrink-0">
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-foreground-secondary">
+                Channels
+              </h2>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => setShowCreate(true)}
+                title="New channel"
+              >
+                <Plus className="h-4 w-4" />
+              </Button>
+            </div>
+            <div className="flex-1 overflow-y-auto px-3 pb-3">
+              <ChannelList
+                activeChannelId={channelId}
+                showCreateDialog={showCreate}
+                onCreateDialogChange={setShowCreate}
+              />
+            </div>
+            <div className="shrink-0 px-3 pb-3">
+              <StorageIndicator />
+            </div>
           </div>
         </div>
 
@@ -38,6 +67,13 @@ export default function ChatLayout({
           {children}
         </div>
       </div>
+
+      {/* Create channel dialog — rendered at layout root, outside glass panel */}
+      <CreateChannelDialog
+        open={showCreate}
+        onOpenChange={setShowCreate}
+        onCreated={handleChannelCreated}
+      />
     </div>
   );
 }

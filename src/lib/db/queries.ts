@@ -115,6 +115,32 @@ export function deleteChannel(id: string): boolean {
   return result.changes > 0;
 }
 
+/**
+ * Mark a channel as accessed (updates last_accessed_at to now).
+ */
+export function touchChannel(id: string): void {
+  const db = getDb();
+  db.update(channels)
+    .set({ lastAccessedAt: Date.now() })
+    .where(eq(channels.id, id))
+    .run();
+}
+
+/**
+ * Get the most recently accessed channel ID, or null if none.
+ */
+export function getLastAccessedChannelId(): string | null {
+  const db = getDb();
+  const row = db
+    .select({ id: channels.id })
+    .from(channels)
+    .where(sql`${channels.lastAccessedAt} IS NOT NULL`)
+    .orderBy(desc(channels.lastAccessedAt))
+    .limit(1)
+    .get();
+  return row?.id ?? null;
+}
+
 // ============================================================================
 // Messages
 // ============================================================================

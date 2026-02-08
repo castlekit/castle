@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState } from "react";
+import { use, useState, useEffect } from "react";
 import { WifiOff, X, AlertCircle, Search } from "lucide-react";
 import { useOpenClaw } from "@/lib/hooks/use-openclaw";
 import { useChat } from "@/lib/hooks/use-chat";
@@ -19,6 +19,28 @@ interface ChannelPageProps {
 function ChannelChatContent({ channelId }: { channelId: string }) {
   const { agents, isConnected, isLoading: gatewayLoading } = useOpenClaw();
   const [showSearch, setShowSearch] = useState(false);
+  const [channelName, setChannelName] = useState<string>("");
+
+  // Mark this channel as last accessed and fetch channel info
+  useEffect(() => {
+    // Touch (mark as last accessed)
+    fetch("/api/openclaw/chat/channels", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "touch", id: channelId }),
+    }).catch(() => {});
+
+    // Fetch channel details for the name
+    fetch("/api/openclaw/chat/channels")
+      .then((r) => r.json())
+      .then((data) => {
+        const ch = (data.channels || []).find(
+          (c: { id: string; name: string }) => c.id === channelId
+        );
+        if (ch) setChannelName(ch.name);
+      })
+      .catch(() => {});
+  }, [channelId]);
 
   // Map agents to the AgentInfo format used by chat components
   const chatAgents: AgentInfo[] = agents.map((a) => ({
@@ -57,8 +79,17 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* Channel header — sticky */}
-      <div className="px-4 py-3 border-b border-border flex items-center justify-between shrink-0">
-        <h2 className="text-sm font-semibold text-foreground">Channel</h2>
+      <div className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
+        <div>
+          <h2 className="text-lg font-semibold text-foreground">
+            {channelName || "Channel"}
+          </h2>
+          {agents.length > 0 && (
+            <p className="text-sm text-foreground-secondary mt-0.5">
+              with {agents.map((a) => a.name).join(" & ")}
+            </p>
+          )}
+        </div>
         <button
           onClick={() => setShowSearch(!showSearch)}
           className="p-1.5 rounded-md text-foreground-secondary hover:text-foreground hover:bg-surface-hover transition-colors"

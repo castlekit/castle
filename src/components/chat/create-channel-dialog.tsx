@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2 } from "lucide-react";
+import { Loader2, ChevronDown } from "lucide-react";
 import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -103,11 +103,11 @@ export function CreateChannelDialog({ open, onOpenChange, onCreated }: CreateCha
         {/* Agent Selection */}
         <div>
           <label className="block text-sm font-medium mb-2">Agents</label>
-          <div className="space-y-2 max-h-48 overflow-y-auto">
+          <div className="selectable-list max-h-48 overflow-y-auto">
             {agents.map((agent) => (
               <label
                 key={agent.id}
-                className="flex items-center gap-3 p-2 rounded-lg hover:bg-surface-hover cursor-pointer"
+                className="selectable-list-item"
               >
                 <Checkbox
                   checked={selectedAgents.includes(agent.id)}
@@ -125,23 +125,26 @@ export function CreateChannelDialog({ open, onOpenChange, onCreated }: CreateCha
         {/* Default Agent */}
         <div>
           <label className="block text-sm font-medium mb-1.5">Default Agent</label>
-          <select
-            value={defaultAgentId}
-            onChange={(e) => {
-              setDefaultAgentId(e.target.value);
-              if (!selectedAgents.includes(e.target.value)) {
-                setSelectedAgents((prev) => [...prev, e.target.value]);
-              }
-            }}
-            className="w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm"
-          >
-            <option value="">Select an agent</option>
-            {agents.map((agent) => (
-              <option key={agent.id} value={agent.id}>
-                {agent.name}
-              </option>
-            ))}
-          </select>
+          <div className="relative">
+            <select
+              value={defaultAgentId}
+              onChange={(e) => {
+                setDefaultAgentId(e.target.value);
+                if (!selectedAgents.includes(e.target.value)) {
+                  setSelectedAgents((prev) => [...prev, e.target.value]);
+                }
+              }}
+              className="input-base appearance-none pr-10 cursor-pointer"
+            >
+              <option value="">Select an agent</option>
+              {agents.map((agent) => (
+                <option key={agent.id} value={agent.id}>
+                  {agent.name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 h-5 w-5 text-foreground-secondary pointer-events-none" />
+          </div>
         </div>
 
         {/* Error */}

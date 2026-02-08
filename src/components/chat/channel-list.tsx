@@ -2,21 +2,27 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Plus, MessageCircle, Loader2 } from "lucide-react";
+import { MessageCircle, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { CreateChannelDialog } from "./create-channel-dialog";
 import type { Channel } from "@/lib/types/chat";
 
 interface ChannelListProps {
   activeChannelId?: string;
   className?: string;
+  showCreateDialog?: boolean;
+  onCreateDialogChange?: (open: boolean) => void;
 }
 
-export function ChannelList({ activeChannelId, className }: ChannelListProps) {
+export function ChannelList({
+  activeChannelId,
+  className,
+  onCreateDialogChange,
+}: ChannelListProps) {
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
+
+  const setShowCreate = onCreateDialogChange ?? (() => {});
 
   const fetchChannels = async () => {
     try {
@@ -36,26 +42,8 @@ export function ChannelList({ activeChannelId, className }: ChannelListProps) {
     fetchChannels();
   }, []);
 
-  const handleChannelCreated = (channel: Channel) => {
-    setChannels((prev) => [channel, ...prev]);
-    setShowCreate(false);
-  };
-
   return (
-    <div className={cn("flex flex-col gap-3", className)}>
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-medium text-foreground-secondary">Channels</h3>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={() => setShowCreate(true)}
-        >
-          <Plus className="h-4 w-4" />
-        </Button>
-      </div>
-
+    <div className={cn("flex flex-col gap-2", className)}>
       {/* Loading */}
       {loading && (
         <div className="flex items-center justify-center py-8">
@@ -81,31 +69,25 @@ export function ChannelList({ activeChannelId, className }: ChannelListProps) {
 
       {/* Channel list */}
       {!loading && channels.length > 0 && (
-        <div className="space-y-1">
+        <div className="selectable-list">
           {channels.map((channel) => (
             <Link
               key={channel.id}
               href={`/chat/${channel.id}`}
               className={cn(
-                "flex items-center gap-3 px-3 py-2 rounded-lg transition-colors",
+                "selectable-list-item transition-colors",
                 activeChannelId === channel.id
                   ? "bg-accent/10 text-accent"
-                  : "hover:bg-surface-hover text-foreground"
+                  : "text-foreground"
               )}
             >
               <MessageCircle className="h-4 w-4 shrink-0" />
-              <span className="truncate text-sm">{channel.name}</span>
+              <span className="truncate">{channel.name}</span>
             </Link>
           ))}
         </div>
       )}
 
-      {/* Create dialog */}
-      <CreateChannelDialog
-        open={showCreate}
-        onOpenChange={setShowCreate}
-        onCreated={handleChannelCreated}
-      />
     </div>
   );
 }
