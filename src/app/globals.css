@@ -86,8 +86,8 @@
   --border: #35353d;
   --border-hover: #45454d;
   
-  --foreground: #fafafa;
-  --foreground-secondary: #a1a1aa;
+  --foreground: #d1d2d3;
+  --foreground-secondary: #9a9b9e;
   --foreground-muted: #71717a;
   
   --accent: #3b82f6;
@@ -186,6 +186,43 @@ body {
   overscroll-behavior: none;
 }
 
+/* Twemoji — inline emoji images matching text size exactly.
+   Sized to 1em so the img is no taller than a capital letter,
+   preventing any line-height expansion. */
+img.emoji {
+  display: inline;
+  height: 1em;
+  width: 1em;
+  margin: 0 0.05em;
+  vertical-align: -0.1em;
+}
+
+/* Custom scrollbar — overlay style, just the thumb, no track */
+/* WebKit (Chrome, Safari, Edge) */
+::-webkit-scrollbar {
+  width: 6px;
+  background: none;
+}
+::-webkit-scrollbar-track {
+  background: none;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.35);
+}
+::-webkit-scrollbar-corner {
+  background: none;
+}
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+}
+
 /* ============================================
    Reusable Component Patterns
    ============================================ */
@@ -219,6 +256,21 @@ body {
   /* Interactive base - combines cursor, focus, and disabled */
   .interactive {
     @apply cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* Panel — standard container style matching dashboard cards (bg-surface, bordered, rounded).
+     Use for sidebars, floating panels, content sections. */
+  .panel {
+    @apply rounded-[var(--radius-md)] bg-surface border border-border;
+  }
+
+  /* Selectable list — compact spacing for checkbox/radio lists, nav lists, etc.
+     Apply .selectable-list to the container; .selectable-list-item to each row. */
+  .selectable-list {
+    @apply space-y-0.5;
+  }
+  .selectable-list-item {
+    @apply flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-surface-hover cursor-pointer text-sm;
   }
 
   /* Input base - shared input/select/textarea styles */

@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
+import useSWR from "swr";
 
 // ============================================================================
 // Types
@@ -33,73 +34,88 @@ interface GatewaySSEEvent {
 }
 
 // ============================================================================
+// Fetchers
+// ============================================================================
+
+const statusFetcher = async (url: string): Promise<OpenClawStatus> => {
+  const res = await fetch(url, { method: "POST" });
+  return res.json();
+};
+
+const agentsFetcher = async (url: string): Promise<OpenClawAgent[]> => {
+  const res = await fetch(url);
+  if (!res.ok) return [];
+  const data = await res.json();
+  return data.agents || [];
+};
+
+// ============================================================================
 // Hook
 // ============================================================================
 
+/**
+ * Shared OpenClaw connection status and agents hook.
+ * Uses SWR for cache-based sharing across all components —
+ * any component calling useOpenClaw() gets the same cached data without extra fetches.
+ *
+ * SSE subscription pushes real-time updates that trigger SWR cache invalidation.
+ */
 export function useOpenClaw() {
-  const [status, setStatus] = useState<OpenClawStatus | null>(null);
-  const [agents, setAgents] = useState<OpenClawAgent[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [agentsLoading, setAgentsLoading] = useState(true);
   const eventSourceRef = useRef<EventSource | null>(null);
 
-  // Fetch connection status
-  const fetchStatus = useCallback(async () => {
-    try {
-      const res = await fetch("/api/openclaw/ping", { method: "POST" });
-      const data: OpenClawStatus = await res.json();
-      setStatus(data);
-      return data;
-    } catch {
-      setStatus({ ok: false, configured: false, error: "Failed to reach Castle server" });
-      return null;
-    } finally {
-      setIsLoading(false);
+  // ---------------------------------------------------------------------------
+  // SWR: Connection status
+  // ---------------------------------------------------------------------------
+  const {
+    data: status,
+    error: statusError,
+    isLoading: statusLoading,
+    mutate: mutateStatus,
+  } = useSWR<OpenClawStatus>(
+    "/api/openclaw/ping",
+    statusFetcher,
+    {
+      refreshInterval: 60000,        // Background refresh every 60s
+      revalidateOnFocus: true,
+      dedupingInterval: 10000,       // Dedup rapid calls within 10s
+      errorRetryCount: 2,
     }
-  }, []);
+  );
 
-  // Fetch agents
-  const fetchAgents = useCallback(async () => {
-    try {
-      setAgentsLoading(true);
-      const res = await fetch("/api/openclaw/agents");
-      if (!res.ok) {
-        setAgents([]);
-        return;
-      }
-      const data = await res.json();
-      setAgents(data.agents || []);
-    } catch {
-      setAgents([]);
-    } finally {
-      setAgentsLoading(false);
+  const isConnected = status?.ok ?? false;
+
+  // ---------------------------------------------------------------------------
+  // SWR: Agents (conditional — only fetch when connected)
+  // ---------------------------------------------------------------------------
+  const {
+    data: agents,
+    isLoading: agentsLoading,
+    mutate: mutateAgents,
+  } = useSWR<OpenClawAgent[]>(
+    isConnected ? "/api/openclaw/agents" : null,
+    agentsFetcher,
+    {
+      refreshInterval: 300000,       // Refresh agents every 5 min
+      revalidateOnFocus: false,
+      dedupingInterval: 30000,       // Dedup within 30s
     }
-  }, []);
+  );
 
-  // Refresh everything
+  // ---------------------------------------------------------------------------
+  // Refresh helpers
+  // ---------------------------------------------------------------------------
   const refresh = useCallback(async () => {
-    const newStatus = await fetchStatus();
-    if (newStatus?.ok) {
-      await fetchAgents();
+    await mutateStatus();
+    if (isConnected) {
+      await mutateAgents();
     }
-  }, [fetchStatus, fetchAgents]);
+  }, [mutateStatus, mutateAgents, isConnected]);
 
-  // Initial data fetch
-  useEffect(() => {
-    let cancelled = false;
+  const refreshAgents = useCallback(() => mutateAgents(), [mutateAgents]);
 
-    async function init() {
-      const s = await fetchStatus();
-      if (!cancelled && s?.ok) {
-        await fetchAgents();
-      }
-    }
-
-    init();
-    return () => { cancelled = true; };
-  }, [fetchStatus, fetchAgents]);
-
+  // ---------------------------------------------------------------------------
   // SSE subscription for real-time events
+  // ---------------------------------------------------------------------------
   useEffect(() => {
     const es = new EventSource("/api/openclaw/events");
     eventSourceRef.current = es;
@@ -108,25 +124,39 @@ export function useOpenClaw() {
       try {
         const evt: GatewaySSEEvent = JSON.parse(e.data);
 
-        // Handle Castle state changes
+        // Handle Castle state changes — update status via SWR
         if (evt.event === "castle.state") {
-          const payload = evt.payload as { state: string; isConnected: boolean; server?: Record<string, unknown> };
-          setStatus((prev) => ({
-            ok: payload.isConnected,
-            configured: prev?.configured ?? true,
-            state: payload.state,
-            server: payload.server as OpenClawStatus["server"],
-          }));
+          const payload = evt.payload as {
+            state: string;
+            isConnected: boolean;
+            server?: Record<string, unknown>;
+          };
+
+          // Optimistically update the SWR cache with the SSE data
+          mutateStatus(
+            (prev) => ({
+              ok: payload.isConnected,
+              configured: prev?.configured ?? true,
+              state: payload.state,
+              server: payload.server as OpenClawStatus["server"],
+            }),
+            { revalidate: false }
+          );
 
           // Re-fetch agents when connection state changes to connected
           if (payload.isConnected) {
-            fetchAgents();
+            mutateAgents();
           }
         }
 
-        // Handle agent-related events -- re-fetch agent list
+        // Handle agent-related events — re-fetch agent list
         if (evt.event?.startsWith("agent.")) {
-          fetchAgents();
+          mutateAgents();
+        }
+
+        // Handle avatar update events
+        if (evt.event === "agentAvatarUpdated") {
+          mutateAgents();
         }
       } catch {
         // Ignore parse errors
@@ -135,29 +165,34 @@ export function useOpenClaw() {
 
     es.onerror = () => {
       // EventSource auto-reconnects, but update state
-      setStatus((prev) => prev ? { ...prev, ok: false, state: "disconnected" } : prev);
+      mutateStatus(
+        (prev) => prev ? { ...prev, ok: false, state: "disconnected" } : prev,
+        { revalidate: false }
+      );
     };
 
     return () => {
       es.close();
       eventSourceRef.current = null;
     };
-  }, [fetchAgents]);
+  }, [mutateStatus, mutateAgents]);
 
   return {
     // Status
     status,
-    isLoading,
-    isConnected: status?.ok ?? false,
+    isLoading: statusLoading,
+    isError: !!statusError,
+    isConnected,
     isConfigured: status?.configured ?? false,
     latency: status?.latency_ms,
     serverVersion: status?.server?.version,
 
     // Agents
-    agents,
+    agents: agents ?? [],
     agentsLoading,
 
     // Actions
     refresh,
+    refreshAgents,
   };
 }

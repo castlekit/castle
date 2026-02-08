@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { readFileSync, existsSync, readdirSync } from "fs";
-import { join } from "path";
+import { join, resolve } from "path";
 import { getOpenClawDir } from "@/lib/config";
 import { sanitizeForApi } from "@/lib/api-security";
 
@@ -14,7 +14,17 @@ export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const rawLines = parseInt(searchParams.get("lines") || "100", 10);
   const lines = Math.min(Math.max(1, Number.isFinite(rawLines) ? rawLines : 100), 10000);
-  const file = searchParams.get("file")?.trim() || "gateway";
+  const rawFile = searchParams.get("file")?.trim() || "gateway";
+
+  // Sanitize file parameter: only allow alphanumeric, hyphens, underscores, dots
+  // Reject anything with path separators or traversal patterns
+  const file = rawFile.replace(/[^a-zA-Z0-9._-]/g, "");
+  if (!file || file.includes("..") || file !== rawFile) {
+    return NextResponse.json(
+      { error: "Invalid log file name" },
+      { status: 400 }
+    );
+  }
 
   const logsDir = join(getOpenClawDir(), "logs");
 
@@ -27,7 +37,7 @@ export async function GET(request: NextRequest) {
     ? readdirSync(logsDir).filter((f) => f.endsWith(".log"))
     : [];
 
-  // Find matching log file
+  // Find matching log file — must match prefix exactly within the logs directory
   const logFile = availableFiles.find((f) => f.startsWith(file));
   if (!logFile) {
     return NextResponse.json({
@@ -39,6 +49,10 @@ export async function GET(request: NextRequest) {
 
   try {
     const logPath = join(logsDir, logFile);
+    // Final safety check: resolved path must be inside the logs directory
+    if (!resolve(logPath).startsWith(resolve(logsDir))) {
+      return NextResponse.json({ error: "Invalid log file path" }, { status: 400 });
+    }
     const content = readFileSync(logPath, "utf-8");
     const allLines = content.split("\n").filter(Boolean);
 
