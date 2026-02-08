@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { execSync } from "child_process";
-import { checkCsrf } from "@/lib/api-security";
+import { checkCsrf, checkRateLimit, rateLimitKey } from "@/lib/api-security";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +12,11 @@ export const dynamic = "force-dynamic";
 export async function POST(request: NextRequest) {
   const csrf = checkCsrf(request);
   if (csrf) return csrf;
+
+  // Rate limit: 5 restarts per minute
+  const rl = checkRateLimit(rateLimitKey(request, "restart"), 5);
+  if (rl) return rl;
+
   try {
     // Try openclaw CLI restart first
     try {

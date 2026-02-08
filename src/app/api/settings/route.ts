@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAllSettings, setSetting } from "@/lib/db/queries";
+import { checkCsrf } from "@/lib/api-security";
 
 // Known setting keys and their validation
 const VALID_KEYS: Record<string, { maxLength: number }> = {
@@ -30,6 +31,9 @@ export async function GET() {
 // ============================================================================
 
 export async function POST(request: NextRequest) {
+  const csrfError = checkCsrf(request);
+  if (csrfError) return csrfError;
+
   let body: Record<string, string>;
 
   try {

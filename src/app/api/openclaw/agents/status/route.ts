@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAgentStatuses, setAgentStatus, type AgentStatusValue } from "@/lib/db/queries";
+import { checkCsrf } from "@/lib/api-security";
 
 const VALID_STATUSES: AgentStatusValue[] = ["idle", "thinking", "active"];
 
@@ -22,6 +23,9 @@ export async function GET() {
 // ============================================================================
 
 export async function POST(request: NextRequest) {
+  const csrfError = checkCsrf(request);
+  if (csrfError) return csrfError;
+
   let body: { agentId?: string; status?: string };
 
   try {

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { checkCsrf, sanitizeForApi } from "@/lib/api-security";
+import { checkCsrf, sanitizeForApi, checkRateLimit, rateLimitKey } from "@/lib/api-security";
 import { ensureGateway } from "@/lib/gateway-connection";
 import {
   createMessage,
@@ -22,6 +22,10 @@ const MAX_MESSAGE_LENGTH = 32768; // 32KB
 export async function POST(request: NextRequest) {
   const csrf = checkCsrf(request);
   if (csrf) return csrf;
+
+  // Rate limit: 30 messages per minute
+  const rl = checkRateLimit(rateLimitKey(request, "chat:send"), 30);
+  if (rl) return rl;
 
   let body: ChatSendRequest;
   try {

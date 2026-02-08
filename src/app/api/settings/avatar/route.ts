@@ -4,6 +4,7 @@ import { join } from "path";
 import { homedir } from "os";
 import sharp from "sharp";
 import { setSetting } from "@/lib/db/queries";
+import { checkCsrf, checkRateLimit, rateLimitKey } from "@/lib/api-security";
 
 export const dynamic = "force-dynamic";
 
@@ -87,6 +88,13 @@ export async function GET() {
 // ============================================================================
 
 export async function POST(request: NextRequest) {
+  const csrfError = checkCsrf(request);
+  if (csrfError) return csrfError;
+
+  // Rate limit: 10 avatar uploads per minute
+  const rl = checkRateLimit(rateLimitKey(request, "avatar:upload"), 10);
+  if (rl) return rl;
+
   const formData = await request.formData();
   const file = formData.get("avatar") as File | null;
 
@@ -160,7 +168,10 @@ export async function POST(request: NextRequest) {
 // DELETE /api/settings/avatar — Remove user avatar
 // ============================================================================
 
-export async function DELETE() {
+export async function DELETE(request: NextRequest) {
+  const csrfError = checkCsrf(request);
+  if (csrfError) return csrfError;
+
   try {
     if (existsSync(AVATARS_DIR)) {
       const existing = readdirSync(AVATARS_DIR).filter((f) => f.startsWith("user."));
