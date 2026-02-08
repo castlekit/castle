@@ -160,7 +160,7 @@ export function MessageList({
       className="flex-1 overflow-y-auto"
       onScroll={handleScroll}
     >
-      <div className="p-4 space-y-4">
+      <div className="py-4 space-y-4">
         {/* Loading more indicator */}
         {loadingMore && (
           <div className="flex justify-center py-2">

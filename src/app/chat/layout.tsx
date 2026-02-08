@@ -31,9 +31,9 @@ export default function ChatLayout({
     <div className="h-screen overflow-hidden bg-background">
       <Sidebar variant="solid" />
 
-      <div className="h-screen ml-[80px] flex">
-        {/* Channel sidebar — floating glass panel */}
-        <div className="w-[290px] shrink-0 py-5 px-[25px]">
+      <div className="h-screen ml-[80px] flex py-[20px]">
+        {/* Channel sidebar — floating glass panel, aligned with sidebar pill */}
+        <div className="w-[290px] shrink-0 px-[25px]">
           <div className="h-full panel flex flex-col">
             <div className="px-4 pt-4 pb-2 flex items-center justify-between shrink-0">
               <h2 className="text-xs font-semibold uppercase tracking-wider text-foreground-secondary">
@@ -68,8 +68,8 @@ export default function ChatLayout({
           </div>
         </div>
 
-        {/* Main content — fills remaining space, children handle internal scroll */}
-        <div className="flex-1 flex flex-col min-w-0 h-full overflow-hidden">
+        {/* Main content — fills remaining space, aligned with floating boxes */}
+        <div className="flex-1 min-w-0 h-full overflow-hidden pr-[20px]">
           {children}
         </div>
       </div>

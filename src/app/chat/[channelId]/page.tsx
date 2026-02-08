@@ -86,7 +86,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
   return (
     <div className="flex-1 flex flex-col h-full overflow-hidden">
       {/* Channel header — sticky */}
-      <div className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0">
+      <div className="py-4 border-b border-border flex items-center justify-between shrink-0">
         <div>
           <h2 className="text-lg font-semibold text-foreground">
             {channelName || "Channel"}
@@ -174,7 +174,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
       )}
 
       {/* Input — sticky at bottom */}
-      <div className="border-t border-border p-4 shrink-0">
+      <div className="border-t border-border pt-5 shrink-0">
         <ChatInput
           onSend={sendMessage}
           onAbort={abortResponse}

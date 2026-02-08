@@ -68,7 +68,7 @@ function Sidebar({
   return (
     <aside
       className={cn(
-        "fixed top-5 left-6 bottom-5 flex flex-col z-40 shadow-xl shadow-black/20 rounded-[28px] w-14",
+        "fixed top-[20px] left-[24px] bottom-[20px] flex flex-col z-40 rounded-[28px] w-14",
         variant === "glass" ? "glass" : "bg-surface border border-border",
         className
       )}
@@ -166,14 +166,14 @@ function SidebarUserMenu() {
     <div ref={menuRef} className="relative flex justify-center pb-[10px]">
       <button
         onClick={() => setOpen(!open)}
-        className="flex items-center justify-center rounded-full cursor-pointer overflow-hidden hover:opacity-80 transition-opacity"
+        className="group flex items-center justify-center rounded-full cursor-pointer overflow-hidden transition-opacity"
       >
         <div className="w-9 h-9 shrink-0 rounded-full overflow-hidden">
           {avatarUrl ? (
             <img
               src={avatarUrl}
               alt="You"
-              className="w-full h-full object-cover"
+              className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-200"
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center text-foreground-secondary">

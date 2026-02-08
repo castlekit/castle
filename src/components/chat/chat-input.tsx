@@ -297,7 +297,7 @@ export function ChatInput({
           />
         )}
 
-        <div className="flex items-end gap-2">
+        <div className="flex items-end gap-3">
           <div className="flex-1 relative">
             {/* ContentEditable editor */}
             <div
@@ -308,7 +308,7 @@ export function ChatInput({
               onPaste={handlePaste}
               data-placeholder="Message (Enter to send, Shift+Enter for new line, @ to mention)"
               className={cn(
-                "w-full px-4 py-3 pr-16 rounded-xl bg-surface-hover border border-border resize-none min-h-[48px] max-h-[200px] overflow-y-auto text-sm focus:outline-none focus:ring-2 focus:ring-accent/50",
+                "w-full px-4 py-3 pr-16 rounded-xl bg-surface border border-border resize-none min-h-[48px] max-h-[200px] overflow-y-auto text-sm focus:outline-none focus:border-accent/50",
                 "empty:before:content-[attr(data-placeholder)] empty:before:text-foreground-secondary/50 empty:before:pointer-events-none",
                 (sending || sendingQueue || disabled) && "opacity-50 pointer-events-none"
               )}
