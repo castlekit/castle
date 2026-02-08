@@ -1,7 +1,8 @@
 "use client";
 
 import { use, useState, useEffect } from "react";
-import { WifiOff, X, AlertCircle, Search } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { WifiOff, X, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useOpenClaw } from "@/lib/hooks/use-openclaw";
 import { useChat } from "@/lib/hooks/use-chat";
@@ -10,7 +11,6 @@ import { useUserSettings } from "@/lib/hooks/use-user-settings";
 import { MessageList } from "@/components/chat/message-list";
 import { ChatInput } from "@/components/chat/chat-input";
 import { SessionStatsPanel } from "@/components/chat/session-stats-panel";
-import { SearchPanel } from "@/components/chat/search-panel";
 import { ChatErrorBoundary } from "./error-boundary";
 import type { AgentInfo } from "@/components/chat/agent-mention-popup";
 
@@ -19,8 +19,9 @@ interface ChannelPageProps {
 }
 
 function ChannelChatContent({ channelId }: { channelId: string }) {
+  const searchParams = useSearchParams();
+  const highlightMessageId = searchParams.get("m") || undefined;
   const { agents, isConnected, isLoading: gatewayLoading } = useOpenClaw();
-  const [showSearch, setShowSearch] = useState(false);
   const [channelName, setChannelName] = useState<string | null>(null);
   const [channelAgentIds, setChannelAgentIds] = useState<string[]>([]);
   const [channelCreatedAt, setChannelCreatedAt] = useState<number | null>(null);
@@ -74,10 +75,6 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
     sendMessage,
     abortResponse,
     sending,
-    searchResults,
-    searchQuery,
-    setSearchQuery,
-    isSearching,
     sendError,
     clearSendError,
   } = useChat({ channelId, defaultAgentId });
@@ -113,30 +110,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
             </p>
           )}
         </div>
-        <button
-          onClick={() => setShowSearch(!showSearch)}
-          className="p-1.5 rounded-md text-foreground-secondary hover:text-foreground hover:bg-surface-hover transition-colors"
-          title="Search messages (Ctrl+F)"
-        >
-          <Search className="h-4 w-4" />
-        </button>
       </div>
-
-      {/* Search panel — sticky */}
-      {showSearch && (
-        <div className="shrink-0">
-          <SearchPanel
-            query={searchQuery}
-            onQueryChange={setSearchQuery}
-            results={searchResults}
-            isSearching={isSearching}
-            onClose={() => {
-              setShowSearch(false);
-              setSearchQuery("");
-            }}
-          />
-        </div>
-      )}
 
       {/* Connection warning banner — sticky */}
       {!isConnected && !gatewayLoading && (
@@ -164,6 +138,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
         channelId={channelId}
         channelName={channelName}
         channelCreatedAt={channelCreatedAt}
+        highlightMessageId={highlightMessageId}
       />
 
       {/* Error toast — sticky above input */}

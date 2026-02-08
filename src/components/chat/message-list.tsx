@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { Bot, CalendarDays, Loader2, MessageSquare } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
 import { SessionDivider } from "./session-divider";
@@ -68,6 +68,7 @@ interface MessageListProps {
   channelId?: string;
   channelName?: string | null;
   channelCreatedAt?: number | null;
+  highlightMessageId?: string;
 }
 
 export function MessageList({
@@ -83,6 +84,7 @@ export function MessageList({
   channelId,
   channelName,
   channelCreatedAt,
+  highlightMessageId,
 }: MessageListProps) {
   const { statuses: agentStatuses, getStatus: getAgentStatus } = useAgentStatus();
   const userStatus = getAgentStatus(USER_STATUS_ID);
@@ -111,6 +113,31 @@ export function MessageList({
       }
     }
   }, [messages, agentStatuses, channelId]);
+
+  // Track which message ID is currently highlighted (for flash animation)
+  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  const highlightHandled = useRef<string | null>(null);
+
+  // Scroll to highlighted message when it appears in the DOM
+  useEffect(() => {
+    if (!highlightMessageId || highlightMessageId === highlightHandled.current) return;
+    if (messages.length === 0) return;
+
+    const el = document.getElementById(`msg-${highlightMessageId}`);
+    if (el) {
+      highlightHandled.current = highlightMessageId;
+      // Delay slightly so layout settles
+      requestAnimationFrame(() => {
+        el.scrollIntoView({ behavior: "smooth", block: "center" });
+        setHighlightedId(highlightMessageId);
+        // Clear highlight after animation (2s)
+        setTimeout(() => setHighlightedId(null), 2000);
+      });
+    } else if (hasMore && onLoadMore) {
+      // Message not in loaded set — load more
+      onLoadMore();
+    }
+  }, [highlightMessageId, messages, hasMore, onLoadMore]);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -367,18 +394,20 @@ export function MessageList({
             && prevMessage.senderId === message.senderId;
 
           return (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              isAgent={message.senderType === "agent"}
-              agentName={agent?.name || getAgentName(message.senderId)}
-              agentAvatar={agent?.avatar || getAgentAvatar(message.senderId)}
-              userAvatar={userAvatar}
-              agents={agents}
-              showHeader={!isSameSender}
-              agentStatus={message.senderType === "agent" ? getAgentStatus(message.senderId) : undefined}
-              userStatus={message.senderType === "user" ? userStatus : undefined}
-            />
+            <div key={message.id} id={`msg-${message.id}`}>
+              <MessageBubble
+                message={message}
+                isAgent={message.senderType === "agent"}
+                agentName={agent?.name || getAgentName(message.senderId)}
+                agentAvatar={agent?.avatar || getAgentAvatar(message.senderId)}
+                userAvatar={userAvatar}
+                agents={agents}
+                showHeader={!isSameSender}
+                agentStatus={message.senderType === "agent" ? getAgentStatus(message.senderId) : undefined}
+                userStatus={message.senderType === "user" ? userStatus : undefined}
+                highlighted={highlightedId === message.id}
+              />
+            </div>
           );
         })}
 

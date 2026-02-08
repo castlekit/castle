@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { ThemeProvider } from "next-themes";
 import { PresenceProvider } from "@/components/providers/presence-provider";
+import { SearchProvider } from "@/components/providers/search-provider";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -36,7 +37,9 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <PresenceProvider>
-            {children}
+            <SearchProvider>
+              {children}
+            </SearchProvider>
           </PresenceProvider>
         </ThemeProvider>
       </body>

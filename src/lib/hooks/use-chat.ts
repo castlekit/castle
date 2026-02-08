@@ -189,12 +189,6 @@ interface UseChatReturn {
   abortResponse: () => Promise<void>;
   sending: boolean;
 
-  // Search
-  searchResults: ChatMessage[];
-  searchQuery: string;
-  setSearchQuery: (q: string) => void;
-  isSearching: boolean;
-
   // Errors
   sendError: string | null;
   clearSendError: () => void;
@@ -209,15 +203,11 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
   const [currentSessionKey, setCurrentSessionKey] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [searchQuery, setSearchQueryState] = useState("");
-  const [searchResults, setSearchResults] = useState<ChatMessage[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [beforeCursor, setBeforeCursor] = useState<string | undefined>(undefined);
 
   // Track active runIds for reconnection timeout
   const activeRunIds = useRef<Set<string>>(new Set());
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   // Helper: update both streaming state and ref in sync
@@ -647,50 +637,6 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
   }, [channelId, mutateHistory, updateStreaming]);
 
   // ---------------------------------------------------------------------------
-  // Search (debounced FTS5)
-  // ---------------------------------------------------------------------------
-  const setSearchQuery = useCallback(
-    (q: string) => {
-      setSearchQueryState(q);
-
-      if (searchTimerRef.current) {
-        clearTimeout(searchTimerRef.current);
-      }
-
-      if (!q.trim()) {
-        setSearchResults([]);
-        setIsSearching(false);
-        return;
-      }
-
-      setIsSearching(true);
-      searchTimerRef.current = setTimeout(async () => {
-        try {
-          const res = await fetch(
-            `/api/openclaw/chat/search?q=${encodeURIComponent(q)}&channelId=${channelId}`
-          );
-          if (res.ok) {
-            const data = await res.json();
-            setSearchResults(data.results ?? []);
-          }
-        } catch {
-          setSearchResults([]);
-        } finally {
-          setIsSearching(false);
-        }
-      }, 300);
-    },
-    [channelId]
-  );
-
-  // Cleanup search timer
-  useEffect(() => {
-    return () => {
-      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    };
-  }, []);
-
-  // ---------------------------------------------------------------------------
   // Clear error
   // ---------------------------------------------------------------------------
   const clearSendError = useCallback(() => setSendError(null), []);
@@ -714,10 +660,6 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
     sendMessage,
     abortResponse,
     sending,
-    searchResults,
-    searchQuery,
-    setSearchQuery,
-    isSearching,
     sendError,
     clearSendError,
   };

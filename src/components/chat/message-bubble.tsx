@@ -22,6 +22,7 @@ interface MessageBubbleProps {
   showHeader?: boolean;
   agentStatus?: AgentStatus;
   userStatus?: AgentStatus;
+  highlighted?: boolean;
 }
 
 export function MessageBubble({
@@ -35,6 +36,7 @@ export function MessageBubble({
   showHeader = true,
   agentStatus,
   userStatus,
+  highlighted,
 }: MessageBubbleProps) {
   const formattedTime = new Date(message.createdAt).toLocaleTimeString([], {
     hour: "numeric",
@@ -60,7 +62,7 @@ export function MessageBubble({
     : undefined;
 
   return (
-    <div className={cn("flex gap-3", showHeader ? "mt-4 first:mt-0" : "mt-0.5 pl-[48px]")}>
+    <div className={cn("flex gap-3 rounded-lg", showHeader ? "mt-4 first:mt-0" : "mt-0.5 pl-[48px]", highlighted && "animate-highlight-flash")}>
       {/* Avatar — only shown on first message in a group */}
       {showHeader && (
         <div className="mt-0.5">

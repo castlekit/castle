@@ -336,3 +336,16 @@ img.emoji {
     transform: scale(1);
   }
 }
+
+/* Search result highlight flash */
+@keyframes highlight-flash {
+  0% {
+    background-color: oklch(from var(--color-accent) l c h / 0.15);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+.animate-highlight-flash {
+  animation: highlight-flash 2s ease-out;
+}

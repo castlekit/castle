@@ -5,6 +5,7 @@ import { useTheme } from "next-themes";
 import {
   LayoutDashboard,
   MessageCircle,
+  Search,
   User,
   Sun,
   Moon,
@@ -16,6 +17,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { usePathname, useRouter } from "next/navigation";
 import { useUserSettings } from "@/lib/hooks/use-user-settings";
+import { useSearchContext } from "@/components/providers/search-provider";
 import { useAgentStatus, USER_STATUS_ID } from "@/lib/hooks/use-agent-status";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 
@@ -58,6 +60,7 @@ function Sidebar({
   const router = useRouter();
   const useLinks = !onNavigate;
   const { tooltips: showTooltips } = useUserSettings();
+  const { openSearch } = useSearchContext();
 
   const activeFromPath = (() => {
     if (!pathname) return "dashboard";
@@ -116,6 +119,27 @@ function Sidebar({
           return <div key={item.id}>{NavEl}</div>;
         })}
       </nav>
+
+      {/* Search button */}
+      <div className="px-2 mb-auto">
+        {showTooltips ? (
+          <Tooltip content="Search (⌘K)" side="right">
+            <button
+              onClick={openSearch}
+              className="flex items-center justify-center w-full rounded-[4px] p-2.5 cursor-pointer text-foreground-secondary hover:text-foreground hover:bg-surface-hover"
+            >
+              <Search className="h-5 w-5 shrink-0" />
+            </button>
+          </Tooltip>
+        ) : (
+          <button
+            onClick={openSearch}
+            className="flex items-center justify-center w-full rounded-[4px] p-2.5 cursor-pointer text-foreground-secondary hover:text-foreground hover:bg-surface-hover"
+          >
+            <Search className="h-5 w-5 shrink-0" />
+          </button>
+        )}
+      </div>
 
       {/* User menu at bottom */}
       <SidebarUserMenu />
