@@ -89,8 +89,9 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
     sessionKey: currentSessionKey,
   });
 
-  // Don't render until channel info has loaded to prevent FOUC
-  const channelReady = channelName !== null;
+  // Don't render until channel info or messages have loaded to prevent FOUC.
+  // Fall back to showing content if channel name can't be resolved (e.g. archived channel).
+  const channelReady = channelName !== null || !isLoading;
 
   return (
     <div className={cn("flex-1 flex flex-col h-full overflow-hidden transition-opacity duration-150", channelReady ? "opacity-100" : "opacity-0")}>
