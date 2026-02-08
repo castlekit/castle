@@ -1,6 +1,7 @@
 "use client";
 
 import { use, useState, useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import { WifiOff, X, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useOpenClaw } from "@/lib/hooks/use-openclaw";
@@ -19,14 +20,11 @@ interface ChannelPageProps {
 
 function ChannelChatContent({ channelId }: { channelId: string }) {
   // Read ?m= param for scroll-to-message from search results.
-  // Using window.location directly avoids useSearchParams() which
-  // requires a Suspense boundary and can prevent the page from rendering.
-  const [highlightMessageId, setHighlightMessageId] = useState<string | undefined>();
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const m = params.get("m");
-    if (m) setHighlightMessageId(m);
-  }, [channelId]);
+  // useSearchParams() is reactive — it updates when the query string
+  // changes, even for same-channel navigation (e.g. clicking two
+  // different search results in the same channel).
+  const searchParams = useSearchParams();
+  const highlightMessageId = searchParams.get("m") || undefined;
   const { agents, isConnected, isLoading: gatewayLoading } = useOpenClaw();
   const [channelName, setChannelName] = useState<string | null>(null);
   const [channelAgentIds, setChannelAgentIds] = useState<string[]>([]);
