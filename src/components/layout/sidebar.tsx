@@ -2,6 +2,7 @@
 
 import {
   LayoutDashboard,
+  MessageCircle,
   type LucideIcon,
 } from "lucide-react";
 import { Fragment } from "react";
@@ -32,6 +33,12 @@ const navItems: NavItem[] = [
     icon: LayoutDashboard,
     href: "/",
   },
+  {
+    id: "chat",
+    label: "Chat",
+    icon: MessageCircle,
+    href: "/chat",
+  },
 ];
 
 function Sidebar({ 
@@ -46,6 +53,7 @@ function Sidebar({
   const activeFromPath = (() => {
     if (!pathname) return "dashboard";
     if (pathname === "/") return "dashboard";
+    if (pathname.startsWith("/chat")) return "chat";
     return "dashboard";
   })();
 

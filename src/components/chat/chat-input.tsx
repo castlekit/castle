@@ -1,0 +1,371 @@
+"use client";
+
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Send, Loader2, ListPlus, ImageIcon, X, Square } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { AgentMentionPopup, getFilteredAgents, type AgentInfo } from "./agent-mention-popup";
+import { MessageQueue } from "./message-queue";
+
+interface ChatInputProps {
+  onSend: (content: string, agentId?: string) => Promise<void>;
+  onAbort?: () => void;
+  sending?: boolean;
+  streaming?: boolean;
+  disabled?: boolean;
+  agents: AgentInfo[];
+  defaultAgentId?: string;
+  channelId?: string;
+  className?: string;
+}
+
+export function ChatInput({
+  onSend,
+  onAbort,
+  sending,
+  streaming,
+  disabled,
+  agents,
+  defaultAgentId,
+  channelId,
+  className,
+}: ChatInputProps) {
+  const [showMentions, setShowMentions] = useState(false);
+  const [mentionFilter, setMentionFilter] = useState("");
+  const [mentionHighlightIndex, setMentionHighlightIndex] = useState(0);
+  const [queue, setQueue] = useState<string[]>([]);
+  const [showQueue, setShowQueue] = useState(false);
+  const [sendingQueue, setSendingQueue] = useState(false);
+  const [isEmpty, setIsEmpty] = useState(true);
+
+  const editorRef = useRef<HTMLDivElement>(null);
+
+  // Get plain text content from editor
+  const getPlainText = useCallback(() => {
+    if (!editorRef.current) return "";
+    return editorRef.current.innerText || "";
+  }, []);
+
+  // Get message content with mentions converted to IDs
+  const getMessageContent = useCallback(() => {
+    if (!editorRef.current) return { text: "", firstMentionId: undefined as string | undefined };
+
+    let text = "";
+    let firstMentionId: string | undefined;
+
+    const processNode = (node: Node) => {
+      if (node.nodeType === Node.TEXT_NODE) {
+        text += node.textContent || "";
+      } else if (node.nodeType === Node.ELEMENT_NODE) {
+        const element = node as HTMLElement;
+        if (element.classList.contains("mention-chip")) {
+          const agentId = element.dataset.agentId;
+          if (agentId) {
+            text += `@${agentId}`;
+            if (!firstMentionId) firstMentionId = agentId;
+          }
+        } else if (element.tagName === "BR") {
+          text += "\n";
+        } else {
+          element.childNodes.forEach(processNode);
+        }
+      }
+    };
+
+    editorRef.current.childNodes.forEach(processNode);
+    return { text: text.trim(), firstMentionId };
+  }, []);
+
+  // Check for @mention trigger
+  const checkForMentionTrigger = useCallback(() => {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) return;
+
+    const range = selection.getRangeAt(0);
+    const container = range.startContainer;
+
+    if (container.nodeType !== Node.TEXT_NODE) {
+      setShowMentions(false);
+      return;
+    }
+
+    const text = container.textContent || "";
+    const cursorPos = range.startOffset;
+    const textBeforeCursor = text.slice(0, cursorPos);
+    const mentionMatch = textBeforeCursor.match(/@(\w*)$/);
+
+    if (mentionMatch) {
+      const newFilter = mentionMatch[1].toLowerCase();
+      if (newFilter !== mentionFilter) setMentionHighlightIndex(0);
+      setMentionFilter(newFilter);
+      setShowMentions(true);
+    } else {
+      setShowMentions(false);
+      setMentionFilter("");
+      setMentionHighlightIndex(0);
+    }
+  }, [mentionFilter]);
+
+  // Handle input changes
+  const handleInput = useCallback(() => {
+    const text = getPlainText();
+    setIsEmpty(!text.trim());
+    checkForMentionTrigger();
+  }, [getPlainText, checkForMentionTrigger]);
+
+  // Insert mention chip
+  const insertMention = useCallback(
+    (agentId: string) => {
+      const agent = agents.find((a) => a.id === agentId);
+      const displayName = agent?.name || agentId;
+
+      const selection = window.getSelection();
+      if (!selection || !selection.rangeCount || !editorRef.current) return;
+
+      const range = selection.getRangeAt(0);
+      const container = range.startContainer;
+
+      if (container.nodeType !== Node.TEXT_NODE) {
+        setShowMentions(false);
+        return;
+      }
+
+      const text = container.textContent || "";
+      const cursorPos = range.startOffset;
+      const textBeforeCursor = text.slice(0, cursorPos);
+      const atIndex = textBeforeCursor.lastIndexOf("@");
+
+      if (atIndex === -1) {
+        setShowMentions(false);
+        return;
+      }
+
+      const replaceRange = document.createRange();
+      replaceRange.setStart(container, atIndex);
+      replaceRange.setEnd(container, cursorPos);
+      selection.removeAllRanges();
+      selection.addRange(replaceRange);
+
+      const chipHtml = `<span class="mention-chip inline-flex items-center px-1.5 py-0.5 rounded bg-accent/20 text-accent font-medium text-sm cursor-default" contenteditable="false" data-agent-id="${agentId}">@${displayName}</span>&nbsp;`;
+      document.execCommand("insertHTML", false, chipHtml);
+
+      setShowMentions(false);
+      setMentionFilter("");
+      setIsEmpty(false);
+      editorRef.current.focus();
+    },
+    [agents]
+  );
+
+  // Handle paste (plain text only, with @mention chips)
+  const handlePaste = useCallback(
+    (e: React.ClipboardEvent) => {
+      const text = e.clipboardData.getData("text/plain");
+      if (text) {
+        e.preventDefault();
+        document.execCommand("insertText", false, text);
+        setIsEmpty(false);
+      }
+    },
+    []
+  );
+
+  // Handle submit
+  const handleSubmit = useCallback(
+    async (e?: React.FormEvent) => {
+      e?.preventDefault();
+      const { text, firstMentionId } = getMessageContent();
+      if (!text || sending || disabled) return;
+
+      const targetAgent = firstMentionId || defaultAgentId;
+
+      if (editorRef.current) editorRef.current.innerHTML = "";
+      setIsEmpty(true);
+
+      await onSend(text, targetAgent);
+    },
+    [getMessageContent, sending, disabled, defaultAgentId, onSend]
+  );
+
+  // Handle keyboard shortcuts
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      // Handle mention popup navigation
+      if (showMentions) {
+        const filteredAgents = getFilteredAgents(agents, mentionFilter);
+
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          setMentionHighlightIndex((prev) =>
+            prev < filteredAgents.length - 1 ? prev + 1 : 0
+          );
+          return;
+        }
+        if (e.key === "ArrowUp") {
+          e.preventDefault();
+          setMentionHighlightIndex((prev) =>
+            prev > 0 ? prev - 1 : filteredAgents.length - 1
+          );
+          return;
+        }
+        if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+          e.preventDefault();
+          if (filteredAgents.length > 0) {
+            insertMention(filteredAgents[mentionHighlightIndex].id);
+          }
+          return;
+        }
+        if (e.key === "Escape") {
+          e.preventDefault();
+          setShowMentions(false);
+          return;
+        }
+      }
+
+      // Regular Enter to send
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        handleSubmit();
+        return;
+      }
+
+      if (e.key === "Escape") {
+        setShowMentions(false);
+        return;
+      }
+    },
+    [handleSubmit, showMentions, agents, mentionFilter, mentionHighlightIndex, insertMention]
+  );
+
+  // Queue management
+  const addToQueue = useCallback(() => {
+    const { text } = getMessageContent();
+    if (!text) return;
+    setQueue((prev) => [...prev, text]);
+    if (editorRef.current) editorRef.current.innerHTML = "";
+    setIsEmpty(true);
+    setShowQueue(true);
+  }, [getMessageContent]);
+
+  const sendQueue = useCallback(async () => {
+    if (queue.length === 0 || sendingQueue) return;
+    setSendingQueue(true);
+    for (const message of queue) {
+      const mentionMatch = message.match(/@(\w+)/);
+      const targetAgent = mentionMatch?.[1] || defaultAgentId;
+      await onSend(message, targetAgent);
+    }
+    setQueue([]);
+    setShowQueue(false);
+    setSendingQueue(false);
+  }, [queue, sendingQueue, defaultAgentId, onSend]);
+
+  const removeFromQueue = (index: number) => {
+    setQueue((prev) => prev.filter((_, i) => i !== index));
+    if (queue.length === 1) setShowQueue(false);
+  };
+
+  const estimatedTokens = Math.ceil(getPlainText().length / 4);
+
+  // Focus editor on mount
+  useEffect(() => {
+    editorRef.current?.focus();
+  }, [channelId]);
+
+  return (
+    <div className={cn("space-y-3", className)}>
+      {/* Message Queue */}
+      {showQueue && queue.length > 0 && (
+        <MessageQueue
+          messages={queue}
+          onRemove={removeFromQueue}
+          onSendAll={sendQueue}
+          sending={sendingQueue}
+        />
+      )}
+
+      {/* Input Area */}
+      <form onSubmit={handleSubmit} className="relative">
+        {/* @mention popup */}
+        {showMentions && (
+          <AgentMentionPopup
+            agents={agents}
+            filter={mentionFilter}
+            onSelect={insertMention}
+            onClose={() => setShowMentions(false)}
+            highlightedIndex={mentionHighlightIndex}
+          />
+        )}
+
+        <div className="flex items-end gap-2">
+          <div className="flex-1 relative">
+            {/* ContentEditable editor */}
+            <div
+              ref={editorRef}
+              contentEditable={!disabled}
+              onInput={handleInput}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              data-placeholder="Message (Enter to send, Shift+Enter for new line, @ to mention)"
+              className={cn(
+                "w-full px-4 py-3 pr-16 rounded-xl bg-surface-hover border border-border resize-none min-h-[48px] max-h-[200px] overflow-y-auto text-sm focus:outline-none focus:ring-2 focus:ring-accent/50",
+                "empty:before:content-[attr(data-placeholder)] empty:before:text-foreground-secondary/50 empty:before:pointer-events-none",
+                (sending || sendingQueue || disabled) && "opacity-50 pointer-events-none"
+              )}
+              role="textbox"
+              aria-multiline="true"
+              suppressContentEditableWarning
+            />
+
+            {/* Token estimate */}
+            {!isEmpty && (
+              <span className="absolute right-3 bottom-3 text-xs text-foreground-secondary/60 pointer-events-none">
+                ~{estimatedTokens} tokens
+              </span>
+            )}
+          </div>
+
+          {/* Queue button */}
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            onClick={addToQueue}
+            disabled={isEmpty || sending || sendingQueue || disabled}
+            className="h-12 w-12 rounded-xl shrink-0"
+            title="Add to queue"
+          >
+            <ListPlus className="h-5 w-5" />
+          </Button>
+
+          {/* Stop / Send button */}
+          {streaming ? (
+            <Button
+              type="button"
+              variant="destructive"
+              size="icon"
+              onClick={onAbort}
+              className="h-12 w-12 rounded-xl shrink-0"
+              title="Stop response"
+            >
+              <Square className="h-5 w-5" />
+            </Button>
+          ) : (
+            <Button
+              type="submit"
+              size="icon"
+              disabled={isEmpty || sending || sendingQueue || disabled}
+              className="h-12 w-12 rounded-xl shrink-0"
+            >
+              {sending ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                <Send className="h-5 w-5" />
+              )}
+            </Button>
+          )}
+        </div>
+      </form>
+    </div>
+  );
+}
