@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MessageCircle, Loader2, Archive } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -82,11 +81,14 @@ export function ChannelList({
       {!loading && channels.length > 0 && (
         <div className="selectable-list">
           {channels.map((channel) => (
-            <Link
+            <div
               key={channel.id}
-              href={`/chat/${channel.id}`}
+              role="button"
+              tabIndex={0}
+              onClick={() => router.push(`/chat/${channel.id}`)}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") router.push(`/chat/${channel.id}`); }}
               className={cn(
-                "selectable-list-item transition-colors group relative flex items-center gap-2.5",
+                "selectable-list-item transition-colors group relative flex items-center gap-2.5 w-full text-left cursor-pointer",
                 activeChannelId === channel.id
                   ? "bg-accent/10 text-accent"
                   : "text-foreground"
@@ -96,7 +98,6 @@ export function ChannelList({
               <span className="truncate flex-1 min-w-0">{channel.name}</span>
               <button
                 onClick={async (e) => {
-                  e.preventDefault();
                   e.stopPropagation();
                   try {
                     const res = await fetch("/api/openclaw/chat/channels", {
@@ -124,7 +125,7 @@ export function ChannelList({
               >
                 <Archive className="h-3.5 w-3.5" />
               </button>
-            </Link>
+            </div>
           ))}
         </div>
       )}

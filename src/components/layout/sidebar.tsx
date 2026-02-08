@@ -14,8 +14,7 @@ import {
 import { CastleIcon } from "@/components/icons/castle-icon";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
-import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useUserSettings } from "@/lib/hooks/use-user-settings";
 import { useAgentStatus, USER_STATUS_ID } from "@/lib/hooks/use-agent-status";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -56,6 +55,7 @@ function Sidebar({
   variant = "solid"
 }: SidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const useLinks = !onNavigate;
   const { tooltips: showTooltips } = useUserSettings();
 
@@ -78,45 +78,23 @@ function Sidebar({
     >
       {/* Header */}
       <div className="flex items-center justify-center pt-5 pb-[60px]">
-        {useLinks ? (
-          <Link
-            href="/"
-            aria-label="Go to Dashboard"
-            className="flex items-center justify-center transition-opacity hover:opacity-85"
-          >
-            <CastleIcon className="h-[36px] w-[36px] min-h-[36px] min-w-[36px] shrink-0 text-[var(--logo-color)] -mt-[3px]" />
-          </Link>
-        ) : (
-          <button
-            type="button"
-            aria-label="Go to Dashboard"
-            onClick={() => onNavigate?.("dashboard")}
-            className="flex items-center justify-center transition-opacity hover:opacity-85 cursor-pointer"
-          >
-            <CastleIcon className="h-[36px] w-[36px] min-h-[36px] min-w-[36px] shrink-0 text-[var(--logo-color)] -mt-[3px]" />
-          </button>
-        )}
+        <button
+          type="button"
+          aria-label="Go to Dashboard"
+          onClick={() => useLinks ? router.push("/") : onNavigate?.("dashboard")}
+          className="flex items-center justify-center transition-opacity hover:opacity-85 cursor-pointer"
+        >
+          <CastleIcon className="h-[36px] w-[36px] min-h-[36px] min-w-[36px] shrink-0 text-[var(--logo-color)] -mt-[3px]" />
+        </button>
       </div>
 
       {/* Navigation */}
       <nav className="flex-1 space-y-1 px-2">
         {navItems.map((item) => {
           const isActive = effectiveActive === item.id;
-          const NavEl = useLinks ? (
-            <Link
-              href={item.href}
-              className={cn(
-                "flex items-center justify-center w-full rounded-[4px] p-2.5 cursor-pointer",
-                isActive
-                  ? "bg-accent/10 text-accent"
-                  : "text-foreground-secondary hover:text-foreground hover:bg-surface-hover"
-              )}
-            >
-              <item.icon className="h-5 w-5 shrink-0" />
-            </Link>
-          ) : (
+          const NavEl = (
             <button
-              onClick={() => onNavigate?.(item.id)}
+              onClick={() => useLinks ? router.push(item.href) : onNavigate?.(item.id)}
               className={cn(
                 "flex items-center justify-center w-full rounded-[4px] p-2.5 cursor-pointer",
                 isActive
@@ -149,6 +127,7 @@ function SidebarUserMenu() {
   const [open, setOpen] = useState(false);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const router = useRouter();
   const { avatarUrl } = useUserSettings();
   const { getStatus } = useAgentStatus();
   const userStatus = getStatus(USER_STATUS_ID);
@@ -194,14 +173,13 @@ function SidebarUserMenu() {
 
       {open && (
         <div className="absolute left-[calc(100%+8px)] bottom-0 w-48 rounded-[var(--radius-md)] bg-surface border border-border shadow-xl py-1 z-50">
-          <Link
-            href="/settings"
-            onClick={() => setOpen(false)}
+          <button
+            onClick={() => { setOpen(false); router.push("/settings"); }}
             className="flex items-center gap-3 w-full px-4 py-2.5 text-sm text-foreground-secondary hover:text-foreground hover:bg-surface-hover cursor-pointer"
           >
             <Settings className="h-4 w-4" />
             Settings
-          </Link>
+          </button>
 
           {mounted && (
             <button

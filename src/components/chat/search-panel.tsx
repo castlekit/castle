@@ -3,7 +3,7 @@
 import { Search, X, Loader2, MessageCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { ChatMessage } from "@/lib/types/chat";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 interface SearchPanelProps {
   query: string;
@@ -22,6 +22,7 @@ export function SearchPanel({
   onClose,
   className,
 }: SearchPanelProps) {
+  const router = useRouter();
   return (
     <div className={cn("border-b border-border", className)}>
       {/* Search input */}
@@ -56,11 +57,10 @@ export function SearchPanel({
           )}
 
           {results.map((msg) => (
-            <Link
+            <button
               key={msg.id}
-              href={`/chat/${msg.channelId}`}
-              onClick={onClose}
-              className="flex items-start gap-3 px-4 py-3 hover:bg-surface-hover transition-colors border-b border-border/30 last:border-b-0"
+              onClick={() => { onClose(); router.push(`/chat/${msg.channelId}`); }}
+              className="flex items-start gap-3 px-4 py-3 hover:bg-surface-hover transition-colors border-b border-border/30 last:border-b-0 w-full text-left cursor-pointer"
             >
               <MessageCircle className="h-4 w-4 text-foreground-secondary shrink-0 mt-0.5" />
               <div className="min-w-0 flex-1">
@@ -77,7 +77,7 @@ export function SearchPanel({
                 </div>
                 <p className="text-sm text-foreground truncate">{msg.content}</p>
               </div>
-            </Link>
+            </button>
           ))}
         </div>
       )}
