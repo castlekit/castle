@@ -20,7 +20,7 @@ export default function SettingsPage() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarSaved, setAvatarSaved] = useState(false);
   const [avatarError, setAvatarError] = useState("");
-  const [tooltipsEnabled, setTooltipsEnabled] = useState(true);
+  const [tooltipsEnabled, setTooltipsEnabled] = useState<boolean | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync from SWR on initial load
@@ -276,13 +276,15 @@ export default function SettingsPage() {
                     }
                   }}
                   className={cn(
-                    "relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer",
+                    "relative inline-flex h-6 w-11 items-center rounded-full cursor-pointer",
+                    initialized && "transition-colors",
                     tooltipsEnabled ? "bg-accent" : "bg-foreground-muted/30"
                   )}
                 >
                   <span
                     className={cn(
-                      "inline-block h-4 w-4 rounded-full bg-white transition-transform",
+                      "inline-block h-4 w-4 rounded-full bg-white",
+                      initialized && "transition-transform",
                       tooltipsEnabled ? "translate-x-6" : "translate-x-1"
                     )}
                   />

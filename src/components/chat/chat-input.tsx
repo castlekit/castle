@@ -266,7 +266,7 @@ export function ChatInput({
               onPaste={handlePaste}
               data-placeholder="Message (Enter to send, Shift+Enter for new line, @ to mention)"
               className={cn(
-                "w-full px-4 py-3 rounded-xl bg-surface border border-border resize-none min-h-[48px] max-h-[200px] overflow-y-auto text-sm focus:outline-none focus:border-accent/50 break-all",
+                "w-full px-4 py-3 rounded-[var(--radius-sm)] bg-surface border border-border resize-none min-h-[48px] max-h-[200px] overflow-y-auto text-sm focus:outline-none focus:border-accent/50 break-all",
                 "empty:before:content-[attr(data-placeholder)] empty:before:text-foreground-secondary/50 empty:before:pointer-events-none",
                 (sending || streaming || disabled) && "opacity-50 pointer-events-none"
               )}
@@ -284,7 +284,7 @@ export function ChatInput({
               variant="destructive"
               size="icon"
               onClick={onAbort}
-              className="h-12 w-12 rounded-xl shrink-0"
+              className="h-12 w-12 rounded-[var(--radius-sm)] shrink-0"
               title="Stop response"
             >
               <Square className="h-5 w-5" />
@@ -294,7 +294,7 @@ export function ChatInput({
               type="submit"
               size="icon"
               disabled={isEmpty || sending || streaming || disabled}
-              className="h-12 w-12 rounded-xl shrink-0"
+              className="h-12 w-12 rounded-[var(--radius-sm)] shrink-0"
             >
               {sending ? (
                 <Loader2 className="h-5 w-5 animate-spin" />

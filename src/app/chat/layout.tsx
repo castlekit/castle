@@ -7,7 +7,6 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { ChannelList } from "@/components/chat/channel-list";
 import { ArchivedChannels } from "@/components/chat/archived-channels";
 import { CreateChannelDialog } from "@/components/chat/create-channel-dialog";
-import { Button } from "@/components/ui/button";
 import { useParams, useRouter } from "next/navigation";
 import type { Channel } from "@/lib/types/chat";
 
@@ -37,21 +36,19 @@ export default function ChatLayout({
         {/* Channel sidebar — floating glass panel, aligned with sidebar pill */}
         <div className="w-[290px] shrink-0 px-[25px]">
           <div className="h-full panel flex flex-col">
-            <div className="px-4 pt-4 pb-2 flex items-center justify-between shrink-0">
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-foreground-secondary">
+            <div className="pl-4 pr-3 py-3 flex items-center justify-between shrink-0 border-b border-border">
+              <h2 className="text-sm font-semibold text-foreground">
                 Channels
               </h2>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-7 w-7"
+              <button
                 onClick={() => setShowCreate(true)}
                 title="New channel"
+                className="flex items-center justify-center h-7 w-7 rounded-[var(--radius-sm)] bg-accent text-white hover:bg-accent/90 transition-colors cursor-pointer"
               >
-                <Plus className="h-4 w-4" />
-              </Button>
+                <Plus className="h-4 w-4 stroke-[2.5]" />
+              </button>
             </div>
-            <div className="flex-1 overflow-y-auto px-3 pb-3">
+            <div className="flex-1 overflow-y-auto px-3 py-3">
               <ChannelList
                 activeChannelId={channelId}
                 showCreateDialog={showCreate}
