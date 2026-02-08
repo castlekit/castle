@@ -15,6 +15,8 @@ interface MessageBubbleProps {
   userAvatar?: string | null;
   agents: AgentInfo[];
   isStreaming?: boolean;
+  /** Whether to show avatar and name (false for consecutive messages from same sender) */
+  showHeader?: boolean;
 }
 
 export function MessageBubble({
@@ -25,10 +27,12 @@ export function MessageBubble({
   userAvatar,
   agents,
   isStreaming,
+  showHeader = true,
 }: MessageBubbleProps) {
   const formattedTime = new Date(message.createdAt).toLocaleTimeString([], {
-    hour: "2-digit",
+    hour: "numeric",
     minute: "2-digit",
+    hour12: true,
   });
 
   const getAgentDisplayName = () => {
@@ -37,53 +41,47 @@ export function MessageBubble({
     return "Unknown Agent";
   };
 
+  const displayName = isAgent ? getAgentDisplayName() : "You";
+  const avatar = isAgent ? agentAvatar : userAvatar;
   const hasAttachments = message.attachments && message.attachments.length > 0;
 
   return (
-    <div
-      className={cn(
-        "flex gap-3 max-w-[85%]",
-        isAgent ? "mr-auto" : "ml-auto flex-row-reverse"
-      )}
-    >
-      {/* Avatar */}
-      {isAgent && agentAvatar ? (
-        <img
-          src={agentAvatar}
-          alt={agentName || "Agent"}
-          className="w-8 h-8 rounded-full shrink-0 object-cover"
-        />
-      ) : !isAgent && userAvatar ? (
-        <img
-          src={userAvatar}
-          alt="You"
-          className="w-8 h-8 rounded-full shrink-0 object-cover"
-        />
-      ) : (
-        <div
-          className={cn(
-            "flex items-center justify-center w-8 h-8 rounded-full shrink-0",
-            isAgent ? "bg-accent/20 text-accent" : "bg-foreground/10 text-foreground"
+    <div className={cn("flex gap-3", showHeader ? "mt-4 first:mt-0" : "mt-0.5 pl-[48px]")}>
+      {/* Avatar — only shown on first message in a group */}
+      {showHeader && (
+        <>
+          {avatar ? (
+            <img
+              src={avatar}
+              alt={displayName}
+              className="w-9 h-9 rounded-lg shrink-0 object-cover mt-0.5"
+            />
+          ) : (
+            <div
+              className={cn(
+                "flex items-center justify-center w-9 h-9 rounded-lg shrink-0 mt-0.5",
+                isAgent ? "bg-accent/20 text-accent" : "bg-foreground/10 text-foreground"
+              )}
+            >
+              {isAgent ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
+            </div>
           )}
-        >
-          {isAgent ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
-        </div>
+        </>
       )}
 
       {/* Message content */}
-      <div className="flex flex-col gap-1 min-w-0">
-        {/* Header */}
-        <div
-          className={cn(
-            "flex items-center gap-2 text-xs text-foreground-secondary",
-            !isAgent && "flex-row-reverse"
-          )}
-        >
-          <span className="font-medium">
-            {isAgent ? getAgentDisplayName() : "You"}
-          </span>
-          <span>{formattedTime}</span>
-        </div>
+      <div className="flex flex-col min-w-0">
+        {/* Name + time header — only on first message in a group */}
+        {showHeader && (
+          <div className="flex items-baseline gap-2 mb-0.5">
+            <span className="font-semibold text-sm text-foreground">
+              {displayName}
+            </span>
+            <span className="text-xs text-foreground-secondary">
+              {formattedTime}
+            </span>
+          </div>
+        )}
 
         {/* Attachments */}
         {hasAttachments && (
@@ -99,19 +97,8 @@ export function MessageBubble({
           </div>
         )}
 
-        {/* Bubble */}
-        <div
-          className={cn(
-            "rounded-2xl text-sm",
-            isAgent
-              ? "bg-surface-hover text-foreground rounded-tl-md"
-              : "bg-accent text-accent-foreground rounded-tr-md",
-            // Only use padding for non-agent or short messages without markdown
-            isAgent && message.content.length > 0
-              ? "px-4 py-2.5"
-              : "px-4 py-2.5"
-          )}
-        >
+        {/* Message text — no bubble, just plain text */}
+        <div className="text-sm text-foreground leading-relaxed">
           {isAgent && message.content ? (
             <MarkdownContent content={message.content} />
           ) : (
@@ -126,13 +113,13 @@ export function MessageBubble({
 
         {/* Status badges */}
         {message.status === "interrupted" && (
-          <div className="flex items-center gap-1 text-xs text-warning">
+          <div className="flex items-center gap-1 text-xs text-warning mt-1">
             <AlertTriangle className="h-3 w-3" />
             <span>Response interrupted</span>
           </div>
         )}
         {message.status === "aborted" && (
-          <div className="flex items-center gap-1 text-xs text-foreground-secondary">
+          <div className="flex items-center gap-1 text-xs text-foreground-secondary mt-1">
             <StopCircle className="h-3 w-3" />
             <span>Response stopped</span>
           </div>
@@ -140,7 +127,7 @@ export function MessageBubble({
 
         {/* Token info for agent messages */}
         {isAgent && !isStreaming && (message.inputTokens || message.outputTokens) && (
-          <div className="text-xs text-foreground-secondary/60 flex items-center gap-2">
+          <div className="text-xs text-foreground-secondary/60 flex items-center gap-2 mt-1">
             {message.inputTokens != null && <span>{message.inputTokens.toLocaleString()} in</span>}
             {message.outputTokens != null && <span>{message.outputTokens.toLocaleString()} out</span>}
           </div>

@@ -157,10 +157,10 @@ export function MessageList({
   return (
     <div
       ref={scrollContainerRef}
-      className="flex-1 overflow-y-auto"
+      className="flex-1 overflow-y-auto flex flex-col"
       onScroll={handleScroll}
     >
-      <div className="py-4 space-y-4">
+      <div className="mt-auto py-4">
         {/* Loading more indicator */}
         {loadingMore && (
           <div className="flex justify-center py-2">
@@ -179,7 +179,7 @@ export function MessageList({
           </div>
         )}
 
-        {groupedContent.map((item) => {
+        {groupedContent.map((item, index) => {
           if ("type" in item) {
             if (item.type === "date") {
               return (
@@ -210,6 +210,13 @@ export function MessageList({
             ? agents.find((a) => a.id === message.senderId)
             : undefined;
 
+          // Check if previous item was a message from the same sender (for grouping)
+          const prevItem = index > 0 ? groupedContent[index - 1] : null;
+          const prevMessage = prevItem && !("type" in prevItem) ? prevItem as ChatMessage : null;
+          const isSameSender = prevMessage
+            && prevMessage.senderType === message.senderType
+            && prevMessage.senderId === message.senderId;
+
           return (
             <MessageBubble
               key={message.id}
@@ -219,6 +226,7 @@ export function MessageList({
               agentAvatar={agent?.avatar || getAgentAvatar(message.senderId)}
               userAvatar={userAvatar}
               agents={agents}
+              showHeader={!isSameSender}
             />
           );
         })}
@@ -271,31 +279,29 @@ export function MessageList({
               return (
                 <div
                   key={`typing-${sm.runId}`}
-                  className="flex gap-3 max-w-[85%] mr-auto"
+                  className="flex gap-3 mt-4"
                 >
                   {avatar ? (
                     <img
                       src={avatar}
                       alt={sm.agentName || getAgentName(sm.agentId) || "Agent"}
-                      className="w-8 h-8 rounded-full shrink-0 object-cover"
+                      className="w-9 h-9 rounded-lg shrink-0 object-cover mt-0.5"
                     />
                   ) : (
-                    <div className="flex items-center justify-center w-8 h-8 rounded-full shrink-0 bg-accent/20 text-accent">
+                    <div className="flex items-center justify-center w-9 h-9 rounded-lg shrink-0 bg-accent/20 text-accent mt-0.5">
                       <Bot className="w-4 h-4" />
                     </div>
                   )}
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center gap-2 text-xs text-foreground-secondary">
-                      <span className="font-medium">
+                  <div className="flex flex-col">
+                    <div className="flex items-baseline gap-2 mb-0.5">
+                      <span className="font-semibold text-sm text-foreground">
                         {sm.agentName || getAgentName(sm.agentId)}
                       </span>
                     </div>
-                    <div className="px-4 py-2.5 rounded-2xl rounded-tl-md bg-surface-hover text-foreground">
-                      <div className="flex items-center gap-1">
-                        <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                        <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                        <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce" />
-                      </div>
+                    <div className="flex items-center gap-1 py-1">
+                      <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce [animation-delay:-0.3s]" />
+                      <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce [animation-delay:-0.15s]" />
+                      <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce" />
                     </div>
                   </div>
                 </div>
