@@ -596,6 +596,18 @@ export function searchMessages(
   // Safety: reject overly long queries
   if (!query || query.length > 500) return [];
 
+  // Sanitize FTS5 query: wrap each word in double quotes to prevent FTS5 operator injection.
+  // FTS5 supports operators like AND, OR, NOT, NEAR, and column filters — quoting each
+  // term treats them as literal strings instead of operators.
+  const sanitizedQuery = query
+    .replace(/"/g, "") // Remove existing quotes to prevent breaking out
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((term) => `"${term}"`)
+    .join(" ");
+
+  if (!sanitizedQuery) return [];
+
   // Use raw SQL for FTS5 MATCH — Drizzle doesn't support virtual tables
   const dbInstance = db as unknown as { all: (query: unknown) => unknown[] };
 
@@ -615,7 +627,7 @@ export function searchMessages(
       ORDER BY m.created_at DESC
       LIMIT ?
     `);
-    rows = stmt.all(query, channelId, limit);
+    rows = stmt.all(sanitizedQuery, channelId, limit);
   } else {
     const stmt = sqlite.prepare(`
       SELECT m.*
@@ -625,7 +637,7 @@ export function searchMessages(
       ORDER BY m.created_at DESC
       LIMIT ?
     `);
-    rows = stmt.all(query, limit);
+    rows = stmt.all(sanitizedQuery, limit);
   }
 
   return rows.map((row) => ({
