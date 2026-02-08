@@ -14,6 +14,7 @@ interface MessageListProps {
   loadingMore?: boolean;
   hasMore?: boolean;
   agents: AgentInfo[];
+  userAvatar?: string | null;
   streamingMessages?: Map<string, StreamingMessage>;
   onLoadMore?: () => void;
 }
@@ -25,6 +26,7 @@ export function MessageList({
   loadingMore,
   hasMore,
   agents,
+  userAvatar,
   streamingMessages,
   onLoadMore,
 }: MessageListProps) {
@@ -215,6 +217,7 @@ export function MessageList({
               isAgent={message.senderType === "agent"}
               agentName={agent?.name || getAgentName(message.senderId)}
               agentAvatar={agent?.avatar || getAgentAvatar(message.senderId)}
+              userAvatar={userAvatar}
               agents={agents}
             />
           );

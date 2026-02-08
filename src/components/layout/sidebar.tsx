@@ -1,16 +1,22 @@
 "use client";
 
+import { useState, useRef, useEffect } from "react";
+import { useTheme } from "next-themes";
 import {
   LayoutDashboard,
   MessageCircle,
+  User,
+  Sun,
+  Moon,
+  Settings,
   type LucideIcon,
 } from "lucide-react";
-import { Fragment } from "react";
 import { CastleIcon } from "@/components/icons/castle-icon";
 import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useUserSettings } from "@/lib/hooks/use-user-settings";
 
 interface NavItem {
   id: string;
@@ -127,9 +133,86 @@ function Sidebar({
         })}
       </nav>
 
-      {/* Spacer at bottom for visual balance */}
-      <div className="pb-4" />
+      {/* User menu at bottom */}
+      <SidebarUserMenu />
     </aside>
+  );
+}
+
+function SidebarUserMenu() {
+  const [open, setOpen] = useState(false);
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  const { avatarUrl } = useUserSettings();
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const isDark = theme === "dark";
+
+  return (
+    <div ref={menuRef} className="relative flex justify-center pb-[10px]">
+      <button
+        onClick={() => setOpen(!open)}
+        className="flex items-center justify-center rounded-full cursor-pointer overflow-hidden hover:opacity-80 transition-opacity"
+      >
+        <div className="w-9 h-9 shrink-0 rounded-full overflow-hidden">
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt="You"
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center text-foreground-secondary">
+              <User className="h-5 w-5" />
+            </div>
+          )}
+        </div>
+      </button>
+
+      {open && (
+        <div className="absolute left-[calc(100%+8px)] bottom-0 w-48 rounded-[var(--radius-md)] bg-surface border border-border shadow-xl py-1 z-50">
+          <Link
+            href="/settings"
+            onClick={() => setOpen(false)}
+            className="flex items-center gap-3 w-full px-4 py-2.5 text-sm text-foreground-secondary hover:text-foreground hover:bg-surface-hover cursor-pointer"
+          >
+            <Settings className="h-4 w-4" />
+            Settings
+          </Link>
+
+          {mounted && (
+            <button
+              onClick={() => {
+                setTheme(isDark ? "light" : "dark");
+                setOpen(false);
+              }}
+              className="flex items-center gap-3 w-full px-4 py-2.5 text-sm text-foreground-secondary hover:text-foreground hover:bg-surface-hover cursor-pointer"
+            >
+              {isDark ? (
+                <Sun className="h-4 w-4" />
+              ) : (
+                <Moon className="h-4 w-4" />
+              )}
+              {isDark ? "Light mode" : "Dark mode"}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

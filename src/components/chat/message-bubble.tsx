@@ -12,6 +12,7 @@ interface MessageBubbleProps {
   isAgent: boolean;
   agentName?: string;
   agentAvatar?: string | null;
+  userAvatar?: string | null;
   agents: AgentInfo[];
   isStreaming?: boolean;
 }
@@ -21,6 +22,7 @@ export function MessageBubble({
   isAgent,
   agentName,
   agentAvatar,
+  userAvatar,
   agents,
   isStreaming,
 }: MessageBubbleProps) {
@@ -49,6 +51,12 @@ export function MessageBubble({
         <img
           src={agentAvatar}
           alt={agentName || "Agent"}
+          className="w-8 h-8 rounded-full shrink-0 object-cover"
+        />
+      ) : !isAgent && userAvatar ? (
+        <img
+          src={userAvatar}
+          alt="You"
           className="w-8 h-8 rounded-full shrink-0 object-cover"
         />
       ) : (

@@ -3,7 +3,7 @@
 import { useRef, useState, useCallback } from "react";
 import { Bot, Wifi, WifiOff, Crown, RefreshCw, Loader2, AlertCircle, Camera } from "lucide-react";
 import { Sidebar } from "@/components/layout/sidebar";
-import { UserMenu } from "@/components/layout/user-menu";
+
 import { PageHeader } from "@/components/layout/page-header";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -294,7 +294,6 @@ export default function HomePage() {
   return (
     <div className="min-h-screen bg-background">
       <Sidebar variant="solid" />
-      <UserMenu className="fixed top-5 right-6 z-50" variant="solid" />
 
       <main className="min-h-screen ml-[80px]">
         <div className="p-8 max-w-4xl">

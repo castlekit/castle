@@ -5,6 +5,7 @@ import { useTheme } from "next-themes";
 import Link from "next/link";
 import { User, Sun, Moon, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useUserSettings } from "@/lib/hooks/use-user-settings";
 
 export interface UserMenuProps {
   className?: string;
@@ -15,6 +16,7 @@ function UserMenu({ className, variant = "solid" }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const { avatarUrl } = useUserSettings();
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -38,11 +40,24 @@ function UserMenu({ className, variant = "solid" }: UserMenuProps) {
       <button
         onClick={() => setOpen(!open)}
         className={cn(
-          "flex items-center justify-center h-14 w-14 rounded-[28px] shadow-xl shadow-black/20 text-foreground-secondary hover:text-foreground cursor-pointer",
-          variant === "glass" ? "glass" : "bg-surface border border-border"
+          "flex items-center justify-center h-14 w-14 rounded-[28px] shadow-xl shadow-black/20 cursor-pointer overflow-hidden",
+          avatarUrl
+            ? ""
+            : cn(
+                "text-foreground-secondary hover:text-foreground",
+                variant === "glass" ? "glass" : "bg-surface border border-border"
+              )
         )}
       >
-        <User className="h-5 w-5" />
+        {avatarUrl ? (
+          <img
+            src={avatarUrl}
+            alt="You"
+            className="w-full h-full object-cover"
+          />
+        ) : (
+          <User className="h-5 w-5" />
+        )}
       </button>
 
       {open && (

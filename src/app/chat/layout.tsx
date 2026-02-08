@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Plus, Archive } from "lucide-react";
 import { Sidebar } from "@/components/layout/sidebar";
-import { UserMenu } from "@/components/layout/user-menu";
+
 import { ChannelList } from "@/components/chat/channel-list";
 import { ArchivedChannels } from "@/components/chat/archived-channels";
 import { CreateChannelDialog } from "@/components/chat/create-channel-dialog";
@@ -30,7 +30,6 @@ export default function ChatLayout({
   return (
     <div className="h-screen overflow-hidden bg-background">
       <Sidebar variant="solid" />
-      <UserMenu className="fixed top-5 right-6 z-50" variant="solid" />
 
       <div className="h-screen ml-[80px] flex">
         {/* Channel sidebar — floating glass panel */}

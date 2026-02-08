@@ -5,6 +5,7 @@ import { WifiOff, X, AlertCircle, Search } from "lucide-react";
 import { useOpenClaw } from "@/lib/hooks/use-openclaw";
 import { useChat } from "@/lib/hooks/use-chat";
 import { useSessionStats } from "@/lib/hooks/use-session-stats";
+import { useUserSettings } from "@/lib/hooks/use-user-settings";
 import { MessageList } from "@/components/chat/message-list";
 import { ChatInput } from "@/components/chat/chat-input";
 import { SessionStatsPanel } from "@/components/chat/session-stats-panel";
@@ -21,9 +22,9 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
   const [showSearch, setShowSearch] = useState(false);
   const [channelName, setChannelName] = useState<string>("");
   const [channelAgentIds, setChannelAgentIds] = useState<string[]>([]);
-  const [displayName, setDisplayName] = useState<string>("");
+  const { displayName, avatarUrl: userAvatar } = useUserSettings();
 
-  // Mark this channel as last accessed and fetch channel info + user settings
+  // Mark this channel as last accessed and fetch channel info
   useEffect(() => {
     // Touch (mark as last accessed)
     fetch("/api/openclaw/chat/channels", {
@@ -44,14 +45,6 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
           setChannelName(ch.name);
           setChannelAgentIds(ch.agents || []);
         }
-      })
-      .catch(() => {});
-
-    // Fetch user display name
-    fetch("/api/settings")
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.displayName) setDisplayName(data.displayName);
       })
       .catch(() => {});
   }, [channelId]);
@@ -159,6 +152,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
         loadingMore={loadingMore}
         hasMore={hasMore}
         agents={chatAgents}
+        userAvatar={userAvatar}
         streamingMessages={streamingMessages}
         onLoadMore={loadMore}
       />
