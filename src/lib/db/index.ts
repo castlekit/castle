@@ -25,7 +25,7 @@ const MAX_BACKUPS = 5;
 const CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000;
 
 /** Current schema version — bump when adding new migrations */
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 // ============================================================================
 // Singleton
@@ -317,6 +317,12 @@ const FTS5_CREATE = `
 // ============================================================================
 
 const TABLE_SQL = `
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS channels (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -413,6 +419,21 @@ function runMigrations(
   if (!channelCols.some((c) => c.name === "last_accessed_at")) {
     console.log("[Castle DB] Migration: adding last_accessed_at to channels");
     sqlite.exec("ALTER TABLE channels ADD COLUMN last_accessed_at INTEGER");
+  }
+
+  // --- Migration 2: Create settings table ---
+  const tables = sqlite
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='settings'")
+    .get() as { name: string } | undefined;
+  if (!tables) {
+    console.log("[Castle DB] Migration: creating settings table");
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at INTEGER NOT NULL
+      )
+    `);
   }
 
   // Checkpoint after migration to persist changes to main DB file immediately

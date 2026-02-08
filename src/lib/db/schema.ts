@@ -14,6 +14,16 @@ export const channels = sqliteTable("channels", {
 });
 
 // ============================================================================
+// settings (key-value store for user preferences)
+// ============================================================================
+
+export const settings = sqliteTable("settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+  updatedAt: integer("updated_at").notNull(), // unix ms
+});
+
+// ============================================================================
 // channel_agents (many-to-many junction)
 // ============================================================================
 

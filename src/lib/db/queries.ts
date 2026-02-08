@@ -8,6 +8,7 @@ import {
   messages,
   messageAttachments,
   messageReactions,
+  settings,
 } from "./schema";
 import type {
   Channel,
@@ -650,4 +651,57 @@ export function getStorageStats() {
     attachments: attachmentCount?.count ?? 0,
     totalAttachmentBytes: totalAttachmentSize?.total ?? 0,
   };
+}
+
+// ============================================================================
+// Settings
+// ============================================================================
+
+/**
+ * Get a setting value by key. Returns null if not set.
+ */
+export function getSetting(key: string): string | null {
+  const db = getDb();
+  const row = db
+    .select({ value: settings.value })
+    .from(settings)
+    .where(eq(settings.key, key))
+    .get();
+  return row?.value ?? null;
+}
+
+/**
+ * Get all settings as a key-value record.
+ */
+export function getAllSettings(): Record<string, string> {
+  const db = getDb();
+  const rows = db.select().from(settings).all();
+  const result: Record<string, string> = {};
+  for (const row of rows) {
+    result[row.key] = row.value;
+  }
+  return result;
+}
+
+/**
+ * Set a setting value (upsert).
+ */
+export function setSetting(key: string, value: string): void {
+  const db = getDb();
+  const existing = db
+    .select({ key: settings.key })
+    .from(settings)
+    .where(eq(settings.key, key))
+    .get();
+
+  if (existing) {
+    db.update(settings)
+      .set({ value, updatedAt: Date.now() })
+      .where(eq(settings.key, key))
+      .run();
+  } else {
+    db.insert(settings)
+      .values({ key, value, updatedAt: Date.now() })
+      .run();
+  }
 }

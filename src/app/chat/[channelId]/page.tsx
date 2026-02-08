@@ -20,8 +20,10 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
   const { agents, isConnected, isLoading: gatewayLoading } = useOpenClaw();
   const [showSearch, setShowSearch] = useState(false);
   const [channelName, setChannelName] = useState<string>("");
+  const [channelAgentIds, setChannelAgentIds] = useState<string[]>([]);
+  const [displayName, setDisplayName] = useState<string>("");
 
-  // Mark this channel as last accessed and fetch channel info
+  // Mark this channel as last accessed and fetch channel info + user settings
   useEffect(() => {
     // Touch (mark as last accessed)
     fetch("/api/openclaw/chat/channels", {
@@ -30,14 +32,26 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
       body: JSON.stringify({ action: "touch", id: channelId }),
     }).catch(() => {});
 
-    // Fetch channel details for the name
+    // Fetch channel details for the name and agents
     fetch("/api/openclaw/chat/channels")
       .then((r) => r.json())
       .then((data) => {
         const ch = (data.channels || []).find(
-          (c: { id: string; name: string }) => c.id === channelId
+          (c: { id: string; name: string; agents?: string[] }) =>
+            c.id === channelId
         );
-        if (ch) setChannelName(ch.name);
+        if (ch) {
+          setChannelName(ch.name);
+          setChannelAgentIds(ch.agents || []);
+        }
+      })
+      .catch(() => {});
+
+    // Fetch user display name
+    fetch("/api/settings")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.displayName) setDisplayName(data.displayName);
       })
       .catch(() => {});
   }, [channelId]);
@@ -84,9 +98,19 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
           <h2 className="text-lg font-semibold text-foreground">
             {channelName || "Channel"}
           </h2>
-          {agents.length > 0 && (
+          {(displayName || channelAgentIds.length > 0) && agents.length > 0 && (
             <p className="text-sm text-foreground-secondary mt-0.5">
-              with {agents.map((a) => a.name).join(" & ")}
+              with{" "}
+              {(() => {
+                const names = [
+                  displayName,
+                  ...channelAgentIds.map(
+                    (id) => agents.find((a) => a.id === id)?.name || id
+                  ),
+                ].filter(Boolean);
+                if (names.length <= 2) return names.join(" & ");
+                return names.slice(0, -1).join(", ") + " & " + names[names.length - 1];
+              })()}
             </p>
           )}
         </div>
