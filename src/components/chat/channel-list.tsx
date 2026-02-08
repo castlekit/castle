@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { MessageCircle, Loader2 } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { MessageCircle, Loader2, Archive } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { Channel } from "@/lib/types/chat";
@@ -19,6 +20,7 @@ export function ChannelList({
   className,
   onCreateDialogChange,
 }: ChannelListProps) {
+  const router = useRouter();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -71,19 +73,53 @@ export function ChannelList({
       {!loading && channels.length > 0 && (
         <div className="selectable-list">
           {channels.map((channel) => (
-            <Link
+            <div
               key={channel.id}
-              href={`/chat/${channel.id}`}
               className={cn(
-                "selectable-list-item transition-colors",
+                "selectable-list-item transition-colors group relative",
                 activeChannelId === channel.id
                   ? "bg-accent/10 text-accent"
                   : "text-foreground"
               )}
             >
-              <MessageCircle className="h-4 w-4 shrink-0" />
-              <span className="truncate">{channel.name}</span>
-            </Link>
+              <Link
+                href={`/chat/${channel.id}`}
+                className="flex items-center gap-2.5 flex-1 min-w-0"
+              >
+                <MessageCircle className="h-4 w-4 shrink-0" />
+                <span className="truncate">{channel.name}</span>
+              </Link>
+              <button
+                onClick={async (e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  try {
+                    const res = await fetch("/api/openclaw/chat/channels", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ action: "archive", id: channel.id }),
+                    });
+                    if (res.ok) {
+                      setChannels((prev) => prev.filter((c) => c.id !== channel.id));
+                      if (activeChannelId === channel.id) {
+                        const remaining = channels.filter((c) => c.id !== channel.id);
+                        if (remaining.length > 0) {
+                          router.push(`/chat/${remaining[0].id}`);
+                        } else {
+                          router.push("/chat");
+                        }
+                      }
+                    }
+                  } catch {
+                    // silent
+                  }
+                }}
+                className="opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-surface-hover text-foreground-secondary hover:text-foreground cursor-pointer"
+                title="Archive channel"
+              >
+                <Archive className="h-3.5 w-3.5" />
+              </button>
+            </div>
           ))}
         </div>
       )}

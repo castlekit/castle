@@ -25,7 +25,7 @@ const MAX_BACKUPS = 5;
 const CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000;
 
 /** Current schema version — bump when adding new migrations */
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 // ============================================================================
 // Singleton
@@ -329,7 +329,8 @@ const TABLE_SQL = `
     default_agent_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
     updated_at INTEGER,
-    last_accessed_at INTEGER
+    last_accessed_at INTEGER,
+    archived_at INTEGER
   );
 
   CREATE TABLE IF NOT EXISTS channel_agents (
@@ -434,6 +435,15 @@ function runMigrations(
         updated_at INTEGER NOT NULL
       )
     `);
+  }
+
+  // --- Migration 3: Add archived_at column to channels ---
+  const channelColsV3 = sqlite.prepare("PRAGMA table_info(channels)").all() as {
+    name: string;
+  }[];
+  if (!channelColsV3.some((c) => c.name === "archived_at")) {
+    console.log("[Castle DB] Migration: adding archived_at to channels");
+    sqlite.exec("ALTER TABLE channels ADD COLUMN archived_at INTEGER");
   }
 
   // Checkpoint after migration to persist changes to main DB file immediately

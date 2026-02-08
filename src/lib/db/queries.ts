@@ -56,9 +56,14 @@ export function createChannel(
   };
 }
 
-export function getChannels(): Channel[] {
+export function getChannels(includeArchived = false): Channel[] {
   const db = getDb();
-  const rows = db.select().from(channels).orderBy(desc(channels.createdAt)).all();
+
+  const query = includeArchived
+    ? db.select().from(channels).where(sql`${channels.archivedAt} IS NOT NULL`).orderBy(desc(channels.archivedAt))
+    : db.select().from(channels).where(sql`${channels.archivedAt} IS NULL`).orderBy(desc(channels.createdAt));
+
+  const rows = query.all();
 
   return rows.map((row) => {
     const agentRows = db
@@ -73,6 +78,7 @@ export function getChannels(): Channel[] {
       defaultAgentId: row.defaultAgentId,
       agents: agentRows.map((a) => a.agentId),
       createdAt: row.createdAt,
+      archivedAt: row.archivedAt ?? null,
     };
   });
 }
@@ -94,6 +100,7 @@ export function getChannel(id: string): Channel | null {
     defaultAgentId: row.defaultAgentId,
     agents: agentRows.map((a) => a.agentId),
     createdAt: row.createdAt,
+    archivedAt: row.archivedAt ?? null,
   };
 }
 
@@ -116,6 +123,26 @@ export function deleteChannel(id: string): boolean {
   return result.changes > 0;
 }
 
+export function archiveChannel(id: string): boolean {
+  const db = getDb();
+  const result = db
+    .update(channels)
+    .set({ archivedAt: Date.now() })
+    .where(eq(channels.id, id))
+    .run();
+  return result.changes > 0;
+}
+
+export function restoreChannel(id: string): boolean {
+  const db = getDb();
+  const result = db
+    .update(channels)
+    .set({ archivedAt: null })
+    .where(eq(channels.id, id))
+    .run();
+  return result.changes > 0;
+}
+
 /**
  * Mark a channel as accessed (updates last_accessed_at to now).
  */
@@ -135,7 +162,10 @@ export function getLastAccessedChannelId(): string | null {
   const row = db
     .select({ id: channels.id })
     .from(channels)
-    .where(sql`${channels.lastAccessedAt} IS NOT NULL`)
+    .where(and(
+      sql`${channels.lastAccessedAt} IS NOT NULL`,
+      sql`${channels.archivedAt} IS NULL`
+    ))
     .orderBy(desc(channels.lastAccessedAt))
     .limit(1)
     .get();

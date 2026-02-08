@@ -8,6 +8,7 @@ export interface Channel {
   defaultAgentId: string;
   agents: string[];         // Agent IDs in this channel
   createdAt: number;        // unix ms
+  archivedAt?: number | null; // unix ms — null if active
 }
 
 // ============================================================================

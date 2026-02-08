@@ -1,12 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, Archive } from "lucide-react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { UserMenu } from "@/components/layout/user-menu";
 import { ChannelList } from "@/components/chat/channel-list";
+import { ArchivedChannels } from "@/components/chat/archived-channels";
 import { CreateChannelDialog } from "@/components/chat/create-channel-dialog";
-import { StorageIndicator } from "@/components/chat/storage-indicator";
 import { Button } from "@/components/ui/button";
 import { useParams, useRouter } from "next/navigation";
 import type { Channel } from "@/lib/types/chat";
@@ -20,6 +20,7 @@ export default function ChatLayout({
   const router = useRouter();
   const channelId = params?.channelId as string | undefined;
   const [showCreate, setShowCreate] = useState(false);
+  const [showArchived, setShowArchived] = useState(false);
 
   const handleChannelCreated = (channel: Channel) => {
     setShowCreate(false);
@@ -57,7 +58,13 @@ export default function ChatLayout({
               />
             </div>
             <div className="shrink-0 px-3 pb-3">
-              <StorageIndicator />
+              <button
+                onClick={() => setShowArchived(true)}
+                className="flex items-center gap-2 w-full px-2 py-2 text-xs text-foreground-secondary hover:text-foreground transition-colors cursor-pointer rounded-lg hover:bg-surface-hover"
+              >
+                <Archive className="h-3.5 w-3.5" />
+                Archived channels
+              </button>
             </div>
           </div>
         </div>
@@ -73,6 +80,16 @@ export default function ChatLayout({
         open={showCreate}
         onOpenChange={setShowCreate}
         onCreated={handleChannelCreated}
+      />
+
+      {/* Archived channels dialog */}
+      <ArchivedChannels
+        open={showArchived}
+        onOpenChange={setShowArchived}
+        onRestored={(channel) => {
+          setShowArchived(false);
+          router.push(`/chat/${channel.id}`);
+        }}
       />
     </div>
   );

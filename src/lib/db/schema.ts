@@ -11,6 +11,7 @@ export const channels = sqliteTable("channels", {
   createdAt: integer("created_at").notNull(), // unix ms
   updatedAt: integer("updated_at"),           // unix ms
   lastAccessedAt: integer("last_accessed_at"), // unix ms — last time user opened this channel
+  archivedAt: integer("archived_at"),           // unix ms — null if active, set when archived
 });
 
 // ============================================================================

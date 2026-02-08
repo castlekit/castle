@@ -6,6 +6,8 @@ import {
   getChannel,
   updateChannel,
   deleteChannel,
+  archiveChannel,
+  restoreChannel,
   touchChannel,
   getLastAccessedChannelId,
 } from "@/lib/db/queries";
@@ -37,7 +39,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ channelId: lastId });
     }
 
-    const all = getChannels();
+    const archived = searchParams.get("archived") === "1";
+    const all = getChannels(archived);
     return NextResponse.json({ channels: all });
   } catch (err) {
     console.error("[Chat Channels] List failed:", (err as Error).message);
@@ -57,7 +60,7 @@ export async function POST(request: NextRequest) {
   if (csrf) return csrf;
 
   let body: {
-    action?: "create" | "update" | "delete" | "touch";
+    action?: "create" | "update" | "delete" | "archive" | "restore" | "touch";
     id?: string;
     name?: string;
     defaultAgentId?: string;
@@ -81,10 +84,45 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true });
   }
 
-  // ------ DELETE ------
+  // ------ ARCHIVE ------
+  if (action === "archive") {
+    if (!body.id) {
+      return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+    const archived = archiveChannel(body.id);
+    if (!archived) {
+      return NextResponse.json({ error: "Channel not found" }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true });
+  }
+
+  // ------ RESTORE ------
+  if (action === "restore") {
+    if (!body.id) {
+      return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+    const restored = restoreChannel(body.id);
+    if (!restored) {
+      return NextResponse.json({ error: "Channel not found" }, { status: 404 });
+    }
+    return NextResponse.json({ ok: true });
+  }
+
+  // ------ DELETE (permanent — only for archived channels) ------
   if (action === "delete") {
     if (!body.id) {
       return NextResponse.json({ error: "id is required" }, { status: 400 });
+    }
+    // Only allow deleting archived channels
+    const ch = getChannel(body.id);
+    if (!ch) {
+      return NextResponse.json({ error: "Channel not found" }, { status: 404 });
+    }
+    if (!ch.archivedAt) {
+      return NextResponse.json(
+        { error: "Channel must be archived before it can be permanently deleted" },
+        { status: 400 }
+      );
     }
     const deleted = deleteChannel(body.id);
     if (!deleted) {
