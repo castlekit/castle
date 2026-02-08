@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Loader2, ChevronDown } from "lucide-react";
 import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -25,8 +25,10 @@ export function CreateChannelDialog({ open, onOpenChange, onCreated }: CreateCha
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Auto-select first agent when agents load
-  if (agents.length > 0 && !defaultAgentId) {
+  // Default to first agent when agents load (once only)
+  const didInit = useRef(false);
+  if (agents.length > 0 && !didInit.current) {
+    didInit.current = true;
     setDefaultAgentId(agents[0].id);
     setSelectedAgents([agents[0].id]);
   }
@@ -48,7 +50,7 @@ export function CreateChannelDialog({ open, onOpenChange, onCreated }: CreateCha
         body: JSON.stringify({
           name: name.trim(),
           defaultAgentId,
-          agents: selectedAgents,
+          agents: [...new Set([defaultAgentId, ...selectedAgents])],
         }),
       });
 
@@ -74,11 +76,17 @@ export function CreateChannelDialog({ open, onOpenChange, onCreated }: CreateCha
 
   const toggleAgent = (agentId: string) => {
     setSelectedAgents((prev) => {
-      if (prev.includes(agentId)) {
-        if (agentId === defaultAgentId) return prev;
-        return prev.filter((id) => id !== agentId);
+      const next = prev.includes(agentId)
+        ? prev.filter((id) => id !== agentId)
+        : [...prev, agentId];
+
+      if (next.length === 1) {
+        setDefaultAgentId(next[0]);
+      } else {
+        setDefaultAgentId("");
       }
-      return [...prev, agentId];
+
+      return next;
     });
   };
 
@@ -105,19 +113,16 @@ export function CreateChannelDialog({ open, onOpenChange, onCreated }: CreateCha
           <label className="block text-sm font-medium mb-2">Agents</label>
           <div className="selectable-list max-h-48 overflow-y-auto">
             {agents.map((agent) => (
-              <label
+              <div
                 key={agent.id}
-                className="selectable-list-item"
+                className="selectable-list-item cursor-pointer"
+                onClick={() => toggleAgent(agent.id)}
               >
                 <Checkbox
                   checked={selectedAgents.includes(agent.id)}
-                  onCheckedChange={() => toggleAgent(agent.id)}
                 />
-                <span className="text-sm">{agent.name}</span>
-                {defaultAgentId === agent.id && (
-                  <span className="text-xs text-accent ml-auto">Default</span>
-                )}
-              </label>
+                <span className="text-sm select-none">{agent.name}</span>
+              </div>
             ))}
           </div>
         </div>
@@ -128,17 +133,12 @@ export function CreateChannelDialog({ open, onOpenChange, onCreated }: CreateCha
           <div className="relative">
             <select
               value={defaultAgentId}
-              onChange={(e) => {
-                setDefaultAgentId(e.target.value);
-                if (!selectedAgents.includes(e.target.value)) {
-                  setSelectedAgents((prev) => [...prev, e.target.value]);
-                }
-              }}
+              onChange={(e) => setDefaultAgentId(e.target.value)}
               className="input-base appearance-none pr-10 cursor-pointer"
             >
               <option value="">Select an agent</option>
               {agents.map((agent) => (
-                <option key={agent.id} value={agent.id}>
+                <option key={agent.id} value={agent.id} disabled={!selectedAgents.includes(agent.id)}>
                   {agent.name}
                 </option>
               ))}

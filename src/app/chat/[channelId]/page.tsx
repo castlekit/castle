@@ -23,6 +23,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
   const [showSearch, setShowSearch] = useState(false);
   const [channelName, setChannelName] = useState<string | null>(null);
   const [channelAgentIds, setChannelAgentIds] = useState<string[]>([]);
+  const [channelCreatedAt, setChannelCreatedAt] = useState<number | null>(null);
   const { displayName, avatarUrl: userAvatar } = useUserSettings();
 
   // Mark this channel as last accessed and fetch channel info
@@ -45,6 +46,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
         if (ch) {
           setChannelName(ch.name);
           setChannelAgentIds(ch.agents || []);
+          setChannelCreatedAt(ch.createdAt ?? null);
         }
       })
       .catch(() => {});
@@ -159,6 +161,8 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
         userAvatar={userAvatar}
         streamingMessages={streamingMessages}
         onLoadMore={loadMore}
+        channelName={channelName}
+        channelCreatedAt={channelCreatedAt}
       />
 
       {/* Error toast — sticky above input */}

@@ -21,8 +21,10 @@ export default function ChatLayout({
   const channelId = params?.channelId as string | undefined;
   const [showCreate, setShowCreate] = useState(false);
   const [showArchived, setShowArchived] = useState(false);
+  const [newChannel, setNewChannel] = useState<Channel | null>(null);
 
   const handleChannelCreated = (channel: Channel) => {
+    setNewChannel(channel);
     setShowCreate(false);
     router.push(`/chat/${channel.id}`);
   };
@@ -54,6 +56,7 @@ export default function ChatLayout({
                 activeChannelId={channelId}
                 showCreateDialog={showCreate}
                 onCreateDialogChange={setShowCreate}
+                newChannel={newChannel}
               />
             </div>
             <div className="shrink-0 px-3 pb-3">
@@ -86,6 +89,7 @@ export default function ChatLayout({
         open={showArchived}
         onOpenChange={setShowArchived}
         onRestored={(channel) => {
+          setNewChannel(channel);
           setShowArchived(false);
           router.push(`/chat/${channel.id}`);
         }}

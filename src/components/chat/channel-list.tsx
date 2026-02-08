@@ -13,12 +13,14 @@ interface ChannelListProps {
   className?: string;
   showCreateDialog?: boolean;
   onCreateDialogChange?: (open: boolean) => void;
+  newChannel?: Channel | null;
 }
 
 export function ChannelList({
   activeChannelId,
   className,
   onCreateDialogChange,
+  newChannel,
 }: ChannelListProps) {
   const router = useRouter();
   const [channels, setChannels] = useState<Channel[]>([]);
@@ -43,6 +45,13 @@ export function ChannelList({
   useEffect(() => {
     fetchChannels();
   }, []); // Only fetch once on mount — channel list doesn't change on navigation
+
+  // Instantly add a newly created channel to the list
+  useEffect(() => {
+    if (newChannel && !channels.some((c) => c.id === newChannel.id)) {
+      setChannels((prev) => [newChannel, ...prev]);
+    }
+  }, [newChannel]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useCallback } from "react";
-import { Bot, Loader2 } from "lucide-react";
+import { Bot, CalendarDays, Loader2, MessageSquare } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
 import { SessionDivider } from "./session-divider";
 import type { ChatMessage, ChannelSession, StreamingMessage } from "@/lib/types/chat";
@@ -17,6 +17,8 @@ interface MessageListProps {
   userAvatar?: string | null;
   streamingMessages?: Map<string, StreamingMessage>;
   onLoadMore?: () => void;
+  channelName?: string | null;
+  channelCreatedAt?: number | null;
 }
 
 export function MessageList({
@@ -29,6 +31,8 @@ export function MessageList({
   userAvatar,
   streamingMessages,
   onLoadMore,
+  channelName,
+  channelCreatedAt,
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -134,8 +138,12 @@ export function MessageList({
 
   if (messages.length === 0 && (!streamingMessages || streamingMessages.size === 0)) {
     return (
-      <div className="flex-1 flex items-center justify-center text-foreground-secondary">
-        <p className="text-sm">No messages yet. Start the conversation!</p>
+      <div className="flex-1 flex items-center justify-center">
+        <div className="flex flex-col items-center">
+          <MessageSquare className="h-9 w-9 text-foreground-secondary/40 mb-3" />
+          <span className="text-sm font-medium text-foreground-secondary">No messages yet</span>
+          <span className="text-xs text-foreground-secondary/60 mt-1">Start the conversation</span>
+        </div>
       </div>
     );
   }
@@ -177,14 +185,10 @@ export function MessageList({
 
   const sortedSessions = [...sessions].sort((a, b) => a.startedAt - b.startedAt);
 
-  // Count distinct days in the message set
-  const distinctDays = new Set(messages.map((m) => getDateKey(m.createdAt)));
-  const showDateSeparators = distinctDays.size > 1 || messages.length > 50;
-
   for (const message of messages) {
-    // Insert date separator when the day changes (skip if only one day and ≤50 messages)
+    // Insert date separator when the day changes
     const dateKey = getDateKey(message.createdAt);
-    if (showDateSeparators && dateKey !== currentDateKey) {
+    if (dateKey !== currentDateKey) {
       groupedContent.push({
         type: "date",
         label: formatDateLabel(message.createdAt),
@@ -230,6 +234,19 @@ export function MessageList({
             >
               Load older messages
             </button>
+          </div>
+        )}
+
+        {/* Channel origin marker — shown when all history is loaded */}
+        {!hasMore && channelCreatedAt && (
+          <div className="flex flex-col items-center py-8 mb-2">
+            <CalendarDays className="h-9 w-9 text-foreground-secondary/40 mb-3" />
+            <span className="text-sm font-medium text-foreground-secondary">
+              Channel created on {new Date(channelCreatedAt).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}
+            </span>
+            <span className="text-xs text-foreground-secondary/60 mt-1">
+              This is the very beginning of the conversation
+            </span>
           </div>
         )}
 
