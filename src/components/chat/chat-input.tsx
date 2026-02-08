@@ -1,11 +1,10 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
-import { Send, Loader2, ListPlus, ImageIcon, X, Square } from "lucide-react";
+import { Send, Loader2, ImageIcon, X, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { AgentMentionPopup, getFilteredAgents, type AgentInfo } from "./agent-mention-popup";
-import { MessageQueue } from "./message-queue";
 
 interface ChatInputProps {
   onSend: (content: string, agentId?: string) => Promise<void>;
@@ -33,9 +32,6 @@ export function ChatInput({
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
   const [mentionHighlightIndex, setMentionHighlightIndex] = useState(0);
-  const [queue, setQueue] = useState<string[]>([]);
-  const [showQueue, setShowQueue] = useState(false);
-  const [sendingQueue, setSendingQueue] = useState(false);
   const [isEmpty, setIsEmpty] = useState(true);
 
   const editorRef = useRef<HTMLDivElement>(null);
@@ -175,7 +171,7 @@ export function ChatInput({
     async (e?: React.FormEvent) => {
       e?.preventDefault();
       const { text, firstMentionId } = getMessageContent();
-      if (!text || sending || disabled) return;
+      if (!text || sending || streaming || disabled) return;
 
       const targetAgent = firstMentionId || defaultAgentId;
 
@@ -184,7 +180,7 @@ export function ChatInput({
 
       await onSend(text, targetAgent);
     },
-    [getMessageContent, sending, disabled, defaultAgentId, onSend]
+    [getMessageContent, sending, streaming, disabled, defaultAgentId, onSend]
   );
 
   // Handle keyboard shortcuts
@@ -237,35 +233,7 @@ export function ChatInput({
     [handleSubmit, showMentions, agents, mentionFilter, mentionHighlightIndex, insertMention]
   );
 
-  // Queue management
-  const addToQueue = useCallback(() => {
-    const { text } = getMessageContent();
-    if (!text) return;
-    setQueue((prev) => [...prev, text]);
-    if (editorRef.current) editorRef.current.innerHTML = "";
-    setIsEmpty(true);
-    setShowQueue(true);
-  }, [getMessageContent]);
 
-  const sendQueue = useCallback(async () => {
-    if (queue.length === 0 || sendingQueue) return;
-    setSendingQueue(true);
-    for (const message of queue) {
-      const mentionMatch = message.match(/@(\w+)/);
-      const targetAgent = mentionMatch?.[1] || defaultAgentId;
-      await onSend(message, targetAgent);
-    }
-    setQueue([]);
-    setShowQueue(false);
-    setSendingQueue(false);
-  }, [queue, sendingQueue, defaultAgentId, onSend]);
-
-  const removeFromQueue = (index: number) => {
-    setQueue((prev) => prev.filter((_, i) => i !== index));
-    if (queue.length === 1) setShowQueue(false);
-  };
-
-  const estimatedTokens = Math.ceil(getPlainText().length / 4);
 
   // Focus editor on mount
   useEffect(() => {
@@ -274,16 +242,6 @@ export function ChatInput({
 
   return (
     <div className={cn("space-y-3", className)}>
-      {/* Message Queue */}
-      {showQueue && queue.length > 0 && (
-        <MessageQueue
-          messages={queue}
-          onRemove={removeFromQueue}
-          onSendAll={sendQueue}
-          sending={sendingQueue}
-        />
-      )}
-
       {/* Input Area */}
       <form onSubmit={handleSubmit} className="relative">
         {/* @mention popup */}
@@ -298,7 +256,7 @@ export function ChatInput({
         )}
 
         <div className="flex items-end gap-3">
-          <div className="flex-1 relative">
+          <div className="flex-1 min-w-0 relative">
             {/* ContentEditable editor */}
             <div
               ref={editorRef}
@@ -308,35 +266,16 @@ export function ChatInput({
               onPaste={handlePaste}
               data-placeholder="Message (Enter to send, Shift+Enter for new line, @ to mention)"
               className={cn(
-                "w-full px-4 py-3 pr-16 rounded-xl bg-surface border border-border resize-none min-h-[48px] max-h-[200px] overflow-y-auto text-sm focus:outline-none focus:border-accent/50",
+                "w-full px-4 py-3 rounded-xl bg-surface border border-border resize-none min-h-[48px] max-h-[200px] overflow-y-auto text-sm focus:outline-none focus:border-accent/50 break-all",
                 "empty:before:content-[attr(data-placeholder)] empty:before:text-foreground-secondary/50 empty:before:pointer-events-none",
-                (sending || sendingQueue || disabled) && "opacity-50 pointer-events-none"
+                (sending || streaming || disabled) && "opacity-50 pointer-events-none"
               )}
               role="textbox"
               aria-multiline="true"
               suppressContentEditableWarning
             />
 
-            {/* Token estimate */}
-            {!isEmpty && (
-              <span className="absolute right-3 bottom-3 text-xs text-foreground-secondary/60 pointer-events-none">
-                ~{estimatedTokens} tokens
-              </span>
-            )}
           </div>
-
-          {/* Queue button */}
-          <Button
-            type="button"
-            variant="outline"
-            size="icon"
-            onClick={addToQueue}
-            disabled={isEmpty || sending || sendingQueue || disabled}
-            className="h-12 w-12 rounded-xl shrink-0"
-            title="Add to queue"
-          >
-            <ListPlus className="h-5 w-5" />
-          </Button>
 
           {/* Stop / Send button */}
           {streaming ? (
@@ -354,7 +293,7 @@ export function ChatInput({
             <Button
               type="submit"
               size="icon"
-              disabled={isEmpty || sending || sendingQueue || disabled}
+              disabled={isEmpty || sending || streaming || disabled}
               className="h-12 w-12 rounded-xl shrink-0"
             >
               {sending ? (

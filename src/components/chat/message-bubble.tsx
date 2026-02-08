@@ -99,7 +99,7 @@ export function MessageBubble({
         )}
 
         {/* Message text — no bubble, just plain text */}
-        <div className="text-[15px] text-foreground leading-[26px]">
+        <div className="text-[15px] text-foreground leading-[26px] break-all">
           <TwemojiText>
             {isAgent && message.content ? (
               <MarkdownContent content={message.content} />
