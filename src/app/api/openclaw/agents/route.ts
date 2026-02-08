@@ -24,34 +24,66 @@ interface AgentsListPayload {
   agents: GatewayAgent[];
 }
 
+interface AgentConfig {
+  id: string;
+  workspace?: string;
+}
+
+interface ConfigGetPayload {
+  hash: string;
+  parsed: {
+    agents?: {
+      list?: AgentConfig[];
+    };
+  };
+}
+
+/** Avatar URL patterns containing a hash */
+const AVATAR_HASH_PATTERNS = [
+  /\/api\/v\d+\/avatars\/([a-f0-9]+)/i,
+  /\/avatars\/([a-f0-9]+)/i,
+];
+
 /**
- * Rewrite avatar URLs to local /api/avatars/ endpoint.
- * Handles URLs like "http://localhost:8787/api/v1/avatars/HASH" -> "/api/avatars/HASH"
+ * Resolve an avatar value into a Castle-proxied URL.
+ *
+ * Handles three formats:
+ *   1. Data URI       → pass through (self-contained)
+ *   2. HTTP(S) URL    → proxy via /api/avatars/:key
+ *   3. Relative path  → proxy via /api/avatars/:key (resolved server-side against workspace)
  */
-function rewriteAvatarUrl(url: string | null): string | null {
-  if (!url) return null;
+function resolveAvatarUrl(
+  avatar: string | null,
+  agentId: string,
+  workspace: string | undefined,
+  gw: ReturnType<typeof ensureGateway>,
+): string | null {
+  if (!avatar) return null;
 
-  // Extract hash from known avatar URL patterns
-  const patterns = [
-    /\/api\/v\d+\/avatars\/([a-f0-9]+)/i,
-    /\/avatars\/([a-f0-9]+)/i,
-  ];
+  // Data URIs are self-contained
+  if (avatar.startsWith("data:")) return avatar;
 
-  for (const pattern of patterns) {
-    const match = url.match(pattern);
-    if (match) {
-      return `/api/avatars/${match[1]}`;
+  // HTTP(S) URL — proxy through Castle
+  if (avatar.startsWith("http://") || avatar.startsWith("https://")) {
+    // Try to extract a hash for a cleaner key
+    for (const pattern of AVATAR_HASH_PATTERNS) {
+      const match = avatar.match(pattern);
+      if (match) {
+        gw.setAvatarUrl(match[1], avatar);
+        return `/api/avatars/${match[1]}`;
+      }
     }
+    // No hash — use agent ID as key
+    const key = `agent-${agentId}`;
+    gw.setAvatarUrl(key, avatar);
+    return `/api/avatars/${key}`;
   }
 
-  // If it's already a relative path or data URI, pass through
-  if (url.startsWith("/") || url.startsWith("data:")) {
-    return url;
-  }
-
-  // Only allow http/https URLs through; reject file:, javascript:, etc.
-  if (url.startsWith("http://") || url.startsWith("https://")) {
-    return url;
+  // Relative path (e.g. "avatars/sam.png") — resolve against workspace
+  if (workspace && !avatar.startsWith("/")) {
+    const key = `agent-${agentId}`;
+    gw.setAvatarUrl(key, `workspace://${workspace}/${avatar}`);
+    return `/api/avatars/${key}`;
   }
 
   return null;
@@ -59,7 +91,8 @@ function rewriteAvatarUrl(url: string | null): string | null {
 
 /**
  * GET /api/openclaw/agents
- * Discover agents from OpenClaw Gateway via agents.list
+ * Discover agents from OpenClaw Gateway via agents.list,
+ * with workspace info from config.get for avatar resolution.
  */
 export async function GET() {
   const gw = ensureGateway();
@@ -72,31 +105,34 @@ export async function GET() {
   }
 
   try {
-    const result = await gw.request<AgentsListPayload>("agents.list", {});
+    // Fetch agents and config in parallel
+    const [agentsResult, configResult] = await Promise.all([
+      gw.request<AgentsListPayload>("agents.list", {}),
+      gw.request<ConfigGetPayload>("config.get", {}).catch(() => null),
+    ]);
 
-    const agents = (result?.agents || []).map((agent: GatewayAgent) => {
-      const name =
-        agent.identity?.name || agent.name || agent.id;
-      const rawAvatar =
-        agent.identity?.avatarUrl || agent.identity?.avatar || null;
+    // Build workspace lookup from config
+    const workspaceMap = new Map<string, string>();
+    if (configResult?.parsed?.agents?.list) {
+      for (const a of configResult.parsed.agents.list) {
+        if (a.workspace) workspaceMap.set(a.id, a.workspace);
+      }
+    }
+
+    const agents = (agentsResult?.agents || []).map((agent: GatewayAgent) => {
+      const name = agent.identity?.name || agent.name || agent.id;
+      const rawAvatar = agent.identity?.avatarUrl || agent.identity?.avatar || null;
       const emoji = agent.identity?.emoji || null;
       const description = agent.identity?.theme || null;
+      const workspace = workspaceMap.get(agent.id);
+      const avatar = resolveAvatarUrl(rawAvatar, agent.id, workspace, gw);
 
-      // Rewrite external avatar URLs to our local /api/avatars/ endpoint
-      const avatar = rewriteAvatarUrl(rawAvatar);
-
-      return {
-        id: agent.id,
-        name,
-        description,
-        avatar,
-        emoji,
-      };
+      return { id: agent.id, name, description, avatar, emoji };
     });
 
     return NextResponse.json({
       agents,
-      defaultId: result?.defaultId,
+      defaultId: agentsResult?.defaultId,
     });
   } catch (err) {
     return NextResponse.json(

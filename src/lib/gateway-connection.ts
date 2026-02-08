@@ -1,6 +1,9 @@
 import WebSocket from "ws";
 import { EventEmitter } from "events";
 import { randomUUID } from "crypto";
+import { execSync } from "child_process";
+import { readFileSync, realpathSync } from "fs";
+import { dirname, join } from "path";
 import { getGatewayUrl, readOpenClawToken, readConfig, configExists } from "./config";
 import { getOrCreateIdentity, signDeviceAuth, saveDeviceToken, getDeviceToken, clearDeviceToken } from "./device-identity";
 
@@ -87,6 +90,8 @@ class GatewayConnection extends EventEmitter {
   private shouldReconnect = true;
   // Device auth: set to true after "device identity mismatch" to fall back to token-only
   private _skipDeviceAuth = false;
+  // Avatar URL mapping: hash → original Gateway URL (for proxying)
+  private _avatarUrls = new Map<string, string>();
 
   get state(): ConnectionState {
     return this._state;
@@ -94,6 +99,16 @@ class GatewayConnection extends EventEmitter {
 
   get serverInfo() {
     return this._serverInfo;
+  }
+
+  /** Store a mapping from avatar hash to its original Gateway URL */
+  setAvatarUrl(hash: string, originalUrl: string): void {
+    this._avatarUrls.set(hash, originalUrl);
+  }
+
+  /** Get the original Gateway URL for an avatar hash */
+  getAvatarUrl(hash: string): string | null {
+    return this._avatarUrls.get(hash) || null;
   }
 
   get isConnected(): boolean {
@@ -326,11 +341,21 @@ class GatewayConnection extends EventEmitter {
 
               this._state = "connected";
               this._serverInfo = helloOk.server || {};
+              // If Gateway reports "dev" or missing version, read from installed package.json
+              if (!this._serverInfo.version || this._serverInfo.version === "dev") {
+                try {
+                  const bin = execSync("which openclaw", { timeout: 2000, encoding: "utf-8" }).trim();
+                  const real = realpathSync(bin);
+                  const pkgPath = join(dirname(real), "package.json");
+                  const pkg = JSON.parse(readFileSync(pkgPath, "utf-8"));
+                  if (pkg.version) this._serverInfo.version = pkg.version;
+                } catch { /* keep whatever the Gateway reported */ }
+              }
               this._features = helloOk.features || {};
               this.reconnectAttempts = 0;
               this.emit("stateChange", this._state);
               this.emit("connected", helloOk);
-              console.log(`[Gateway] Connected to OpenClaw v${helloOk.server?.version || "unknown"}`);
+              console.log(`[Gateway] Connected to OpenClaw ${this._serverInfo.version || "unknown"}`);
               // Switch to normal message handler
               this.ws?.off("message", onHandshakeMessage);
               this.ws?.on("message", this.onMessage.bind(this));
@@ -568,16 +593,26 @@ class GatewayConnection extends EventEmitter {
 }
 
 // ============================================================================
-// Singleton export
+// Singleton export (uses globalThis to survive HMR in dev mode)
 // ============================================================================
 
-let _gateway: GatewayConnection | null = null;
+const GATEWAY_KEY = "__castle_gateway__" as const;
+
+function getGlobalGateway(): GatewayConnection | null {
+  return (globalThis as Record<string, unknown>)[GATEWAY_KEY] as GatewayConnection | null ?? null;
+}
+
+function setGlobalGateway(gw: GatewayConnection): void {
+  (globalThis as Record<string, unknown>)[GATEWAY_KEY] = gw;
+}
 
 export function getGateway(): GatewayConnection {
-  if (!_gateway) {
-    _gateway = new GatewayConnection();
+  let gw = getGlobalGateway();
+  if (!gw) {
+    gw = new GatewayConnection();
+    setGlobalGateway(gw);
   }
-  return _gateway;
+  return gw;
 }
 
 /**

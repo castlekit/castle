@@ -1,6 +1,7 @@
 "use client";
 
-import { Bot, Wifi, WifiOff, Crown, RefreshCw, Loader2, AlertCircle } from "lucide-react";
+import { useRef, useState, useCallback } from "react";
+import { Bot, Wifi, WifiOff, Crown, RefreshCw, Loader2, AlertCircle, Camera } from "lucide-react";
 import { Sidebar } from "@/components/layout/sidebar";
 import { UserMenu } from "@/components/layout/user-menu";
 import { PageHeader } from "@/components/layout/page-header";
@@ -14,7 +15,66 @@ function getInitials(name: string) {
   return name.slice(0, 2).toUpperCase();
 }
 
-function AgentCard({ agent, isPrimary, isConnected }: { agent: OpenClawAgent; isPrimary: boolean; isConnected: boolean }) {
+function AgentCard({
+  agent,
+  isPrimary,
+  isConnected,
+  onAvatarUpdated,
+}: {
+  agent: OpenClawAgent;
+  isPrimary: boolean;
+  isConnected: boolean;
+  onAvatarUpdated: () => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
+
+  const handleAvatarClick = useCallback(() => {
+    if (!isConnected) return;
+    fileInputRef.current?.click();
+  }, [isConnected]);
+
+  const handleFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      // Reset input so the same file can be selected again
+      e.target.value = "";
+
+      // Client-side validation
+      if (file.size > 5 * 1024 * 1024) {
+        alert("Image too large (max 5MB)");
+        return;
+      }
+
+      setUploading(true);
+      try {
+        const formData = new FormData();
+        formData.append("avatar", file);
+
+        const resp = await fetch(`/api/openclaw/agents/${agent.id}/avatar`, {
+          method: "POST",
+          body: formData,
+        });
+
+        const result = await resp.json();
+        if (!resp.ok) {
+          alert(result.error || "Failed to update avatar");
+          return;
+        }
+
+        // Refresh agents to pick up new avatar
+        onAvatarUpdated();
+      } catch {
+        alert("Failed to upload avatar");
+      } finally {
+        setUploading(false);
+      }
+    },
+    [agent.id, onAvatarUpdated]
+  );
+
   return (
     <Card
       variant="bordered"
@@ -27,19 +87,45 @@ function AgentCard({ agent, isPrimary, isConnected }: { agent: OpenClawAgent; is
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <Avatar size="md" status={isConnected ? "online" : "offline"}>
-            {agent.avatar ? (
-              <AvatarImage
-                src={agent.avatar}
-                alt={agent.name}
-                className={cn(!isConnected && "grayscale")}
-              />
-            ) : (
-              <AvatarFallback>
-                {agent.emoji || getInitials(agent.name)}
-              </AvatarFallback>
+          {/* Clickable avatar with upload overlay */}
+          <button
+            type="button"
+            onClick={handleAvatarClick}
+            disabled={!isConnected || uploading}
+            className="relative group rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            title={isConnected ? "Click to change avatar" : undefined}
+          >
+            <Avatar size="md" status={isConnected ? "online" : "offline"}>
+              {agent.avatar ? (
+                <AvatarImage
+                  src={agent.avatar}
+                  alt={agent.name}
+                  className={cn(!isConnected && "grayscale")}
+                />
+              ) : (
+                <AvatarFallback>
+                  {agent.emoji || getInitials(agent.name)}
+                </AvatarFallback>
+              )}
+            </Avatar>
+            {isConnected && !uploading && (
+              <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                <Camera className="h-4 w-4 text-white" />
+              </div>
             )}
-          </Avatar>
+            {uploading && (
+              <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center">
+                <Loader2 className="h-4 w-4 text-white animate-spin" />
+              </div>
+            )}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="hidden"
+            onChange={handleFileChange}
+          />
           <div>
             <div className="flex items-center gap-2">
               <p className="text-sm font-medium text-foreground">
@@ -92,7 +178,7 @@ function ConnectionCard({
     if (!isConfigured) return "Run 'castle setup' to configure";
     if (isConnected) {
       const parts = ["Connected"];
-      if (serverVersion) parts[0] = `Connected to OpenClaw v${serverVersion}`;
+      if (serverVersion) parts[0] = `Connected to OpenClaw ${serverVersion}`;
       if (latency) parts.push(`${latency}ms`);
       return parts.join(" · ");
     }
@@ -255,6 +341,7 @@ export default function HomePage() {
                     agent={agent}
                     isPrimary={idx === 0}
                     isConnected={isConnected}
+                    onAvatarUpdated={refresh}
                   />
                 ))}
               </div>
