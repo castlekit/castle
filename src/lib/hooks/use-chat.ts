@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import useSWR from "swr";
+import useSWR, { mutate as globalMutate } from "swr";
 import type {
   ChatMessage,
   StreamingMessage,
@@ -20,6 +20,145 @@ const historyFetcher = async (url: string) => {
   if (!res.ok) throw new Error("Failed to load messages");
   return res.json();
 };
+
+// ============================================================================
+// Orphaned run handler (module-level singleton)
+// ============================================================================
+//
+// When a chat component unmounts while an agent is still processing,
+// we hand off its EventSource and active runs to this module-level handler.
+// It continues processing SSE events so "final"/"error" events persist
+// the completed message to the DB. Without this, messages are lost on nav.
+//
+// Uses a single shared EventSource to avoid exhausting the browser's
+// per-origin connection limit when the user navigates between many channels.
+
+interface OrphanedRun {
+  channelId: string;
+  agentId: string;
+  agentName: string;
+  sessionKey: string;
+  content: string;
+  startedAt: number;
+}
+
+// Singleton state — shared across all unmounted chat instances
+const orphanedRuns = new Map<string, OrphanedRun>();
+let orphanedES: EventSource | null = null;
+let orphanedSafetyTimer: ReturnType<typeof setTimeout> | null = null;
+
+function cleanupOrphaned() {
+  if (orphanedSafetyTimer) {
+    clearTimeout(orphanedSafetyTimer);
+    orphanedSafetyTimer = null;
+  }
+  orphanedES?.close();
+  orphanedES = null;
+  orphanedRuns.clear();
+}
+
+function persistOrphanedRun(
+  runId: string,
+  run: OrphanedRun,
+  delta: ChatDelta,
+  status: "complete" | "interrupted",
+) {
+  orphanedRuns.delete(runId);
+  setAgentActive(run.agentId);
+
+  const content = status === "complete"
+    ? (delta.text || delta.message?.content?.[0]?.text || run.content)
+    : run.content;
+
+  if (content) {
+    const payload: ChatCompleteRequest = {
+      runId,
+      channelId: run.channelId,
+      content,
+      sessionKey: delta.sessionKey || run.sessionKey,
+      agentId: run.agentId,
+      agentName: run.agentName,
+      status,
+      ...(status === "complete" && {
+        inputTokens: delta.message?.inputTokens,
+        outputTokens: delta.message?.outputTokens,
+      }),
+    };
+
+    fetch("/api/openclaw/chat", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+      .then(() => {
+        // Trigger SWR revalidation so the message shows when user navigates back
+        globalMutate(
+          (key) =>
+            typeof key === "string" &&
+            key.startsWith(`/api/openclaw/chat?channelId=${run.channelId}`),
+        );
+      })
+      .catch((err) => console.error("[useChat] Orphan persist failed:", err));
+  }
+
+  // All runs done — tear down
+  if (orphanedRuns.size === 0) {
+    cleanupOrphaned();
+  }
+}
+
+function attachOrphanedHandler() {
+  if (!orphanedES) return;
+
+  orphanedES.onmessage = (e) => {
+    try {
+      const evt = JSON.parse(e.data);
+      if (evt.event !== "chat") return;
+
+      const delta = evt.payload as ChatDelta;
+      if (!delta?.runId || !orphanedRuns.has(delta.runId)) return;
+
+      const run = orphanedRuns.get(delta.runId)!;
+
+      if (delta.state === "delta") {
+        const text = delta.text ?? delta.message?.content?.[0]?.text ?? "";
+        if (text) run.content += text;
+      } else if (delta.state === "final") {
+        persistOrphanedRun(delta.runId, run, delta, "complete");
+      } else if (delta.state === "error") {
+        persistOrphanedRun(delta.runId, run, delta, "interrupted");
+      }
+    } catch {
+      // Ignore parse errors
+    }
+  };
+}
+
+/**
+ * Hand off an EventSource and its active runs to the module-level handler.
+ * Multiple unmounts merge into a single shared connection.
+ */
+function orphanEventSource(
+  es: EventSource,
+  newRuns: Map<string, OrphanedRun>,
+) {
+  // Merge new runs into the shared state
+  for (const [runId, run] of newRuns) {
+    orphanedRuns.set(runId, run);
+  }
+
+  if (orphanedES && orphanedES !== es) {
+    // Already have an orphaned ES — close the old one and use the newer
+    // (fresher) connection
+    orphanedES.close();
+  }
+  orphanedES = es;
+  attachOrphanedHandler();
+
+  // Reset safety timer (5 min) so stale connections don't leak
+  if (orphanedSafetyTimer) clearTimeout(orphanedSafetyTimer);
+  orphanedSafetyTimer = setTimeout(cleanupOrphaned, 5 * 60 * 1000);
+}
 
 // ============================================================================
 // Hook
@@ -325,7 +464,28 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
     };
 
     return () => {
-      es.close();
+      if (activeRunIds.current.size > 0) {
+        // Agent is still processing — hand off the EventSource to the
+        // module-level handler so "final" events still get persisted
+        // even though the component is unmounting.
+        const runs = new Map<string, OrphanedRun>();
+        for (const runId of activeRunIds.current) {
+          const sm = streamingRef.current.get(runId);
+          if (sm) {
+            runs.set(runId, {
+              channelId,
+              agentId: sm.agentId,
+              agentName: sm.agentName,
+              sessionKey: sm.sessionKey,
+              content: sm.content,
+              startedAt: sm.startedAt,
+            });
+          }
+        }
+        orphanEventSource(es, runs);
+      } else {
+        es.close();
+      }
       eventSourceRef.current = null;
     };
   // We intentionally omit streamingMessages and currentSessionKey from deps
@@ -428,7 +588,7 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
 
         // Add streaming placeholder — shows typing indicator
         const resolvedAgentId = agentId || defaultAgentId || "";
-        setAgentThinking(resolvedAgentId);
+        setAgentThinking(resolvedAgentId, channelId);
 
         updateStreaming((prev) => {
           const next = new Map(prev);
