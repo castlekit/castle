@@ -37,11 +37,28 @@ export function getConfigPath(): string {
 export function ensureCastleDir(): void {
   const dir = getCastleDir();
   if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+  // Tighten existing directories that may have been created with default perms
+  if (platform() !== "win32") {
+    try { chmodSync(dir, 0o700); } catch { /* ignore */ }
   }
   const dataDir = join(dir, "data");
   if (!existsSync(dataDir)) {
-    mkdirSync(dataDir, { recursive: true });
+    mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  }
+  const logsDir = join(dir, "logs");
+  if (!existsSync(logsDir)) {
+    mkdirSync(logsDir, { recursive: true, mode: 0o700 });
+  }
+  // Tighten log file permissions — LaunchAgent creates them with default umask
+  if (platform() !== "win32") {
+    for (const logFile of ["server.log", "server.err"]) {
+      const logPath = join(logsDir, logFile);
+      if (existsSync(logPath)) {
+        try { chmodSync(logPath, 0o600); } catch { /* ignore */ }
+      }
+    }
   }
 }
 
