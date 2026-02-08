@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { Bot, Loader2 } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
 import { SessionDivider } from "./session-divider";
@@ -34,24 +34,21 @@ export function MessageList({
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const isInitialLoad = useRef(true);
 
-  // Auto-scroll to bottom when messages load or new messages arrive
-  useEffect(() => {
-    if (messages.length > 0) {
-      const scrollToBottom = () => {
-        bottomRef.current?.scrollIntoView({
-          behavior: isInitialLoad.current ? "instant" : "smooth",
-        });
-        isInitialLoad.current = false;
-      };
-
-      if (isInitialLoad.current) {
-        // On initial load, wait for layout to settle (Twemoji, markdown, images)
-        requestAnimationFrame(() => {
-          setTimeout(scrollToBottom, 50);
-        });
-      } else {
-        scrollToBottom();
+  // Initial scroll: useLayoutEffect runs BEFORE paint so user never sees the jump
+  useLayoutEffect(() => {
+    if (isInitialLoad.current && messages.length > 0) {
+      const container = scrollContainerRef.current;
+      if (container) {
+        container.scrollTop = container.scrollHeight;
       }
+      isInitialLoad.current = false;
+    }
+  }, [messages.length]);
+
+  // Subsequent messages: smooth scroll after paint
+  useEffect(() => {
+    if (!isInitialLoad.current && messages.length > 0) {
+      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
     }
   }, [messages.length]);
 
@@ -168,10 +165,10 @@ export function MessageList({
   return (
     <div
       ref={scrollContainerRef}
-      className="flex-1 overflow-y-auto flex flex-col"
+      className="flex-1 overflow-y-auto flex flex-col justify-end"
       onScroll={handleScroll}
     >
-      <div className="mt-auto py-[20px] pr-[20px]">
+      <div className="py-[20px] pr-[20px]">
         {/* Loading more indicator */}
         {loadingMore && (
           <div className="flex justify-center py-2">
