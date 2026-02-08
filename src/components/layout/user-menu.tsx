@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from "react";
 import { useTheme } from "next-themes";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { User, Sun, Moon, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useUserSettings } from "@/lib/hooks/use-user-settings";
@@ -16,6 +16,7 @@ function UserMenu({ className, variant = "solid" }: UserMenuProps) {
   const [open, setOpen] = useState(false);
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
+  const router = useRouter();
   const { avatarUrl } = useUserSettings();
   const menuRef = useRef<HTMLDivElement>(null);
 
@@ -62,14 +63,13 @@ function UserMenu({ className, variant = "solid" }: UserMenuProps) {
 
       {open && (
         <div className="absolute right-0 top-[calc(100%+8px)] w-48 rounded-[var(--radius-md)] bg-surface border border-border shadow-xl py-1 z-50">
-          <Link
-            href="/settings"
-            onClick={() => setOpen(false)}
+          <button
+            onClick={() => { setOpen(false); router.push("/settings"); }}
             className="flex items-center gap-3 w-full px-4 py-2.5 text-sm text-foreground-secondary hover:text-foreground hover:bg-surface-hover cursor-pointer"
           >
             <Settings className="h-4 w-4" />
             Settings
-          </Link>
+          </button>
 
           {mounted && (
             <button

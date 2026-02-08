@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef } from "react";
 import { Loader2, Check, ArrowLeft, Camera, Trash2, User } from "lucide-react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 
 import { Button } from "@/components/ui/button";
@@ -11,6 +11,7 @@ import { useUserSettings } from "@/lib/hooks/use-user-settings";
 import { cn } from "@/lib/utils";
 
 export default function SettingsPage() {
+  const router = useRouter();
   const { displayName: savedName, avatarUrl: sharedAvatarUrl, tooltips: savedTooltips, isLoading: settingsLoading, refresh } = useUserSettings();
   const [displayName, setDisplayName] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
@@ -110,13 +111,13 @@ export default function SettingsPage() {
 
       <div className="ml-[80px] p-8 max-w-2xl">
         <div className="mb-8">
-          <Link
-            href="/"
-            className="inline-flex items-center gap-1.5 text-sm text-foreground-secondary hover:text-foreground transition-colors mb-4"
+          <button
+            onClick={() => router.push("/")}
+            className="inline-flex items-center gap-1.5 text-sm text-foreground-secondary hover:text-foreground transition-colors mb-4 cursor-pointer"
           >
             <ArrowLeft className="h-4 w-4" />
             Back
-          </Link>
+          </button>
           <h1 className="text-2xl font-semibold text-foreground">Settings</h1>
           <p className="text-sm text-foreground-secondary mt-1">
             Configure your Castle preferences
