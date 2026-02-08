@@ -35,6 +35,7 @@ export function MessageList({
   const contentRef = useRef<HTMLDivElement>(null);
   const isInitialLoad = useRef(true);
   const pinnedToBottom = useRef(true);
+  const isLoadingOlder = useRef(false);
 
   // Scroll helper
   const scrollToBottom = useCallback(() => {
@@ -81,10 +82,15 @@ export function MessageList({
     }
   }, [messages.length, scrollToBottom]);
 
-  // Re-pin to bottom when new messages arrive or streaming changes
+  // Re-pin to bottom when new messages arrive or streaming changes,
+  // but NOT when loading older messages via infinite scroll.
   useLayoutEffect(() => {
     if (!isInitialLoad.current) {
-      pinnedToBottom.current = true;
+      if (isLoadingOlder.current) {
+        isLoadingOlder.current = false;
+      } else {
+        pinnedToBottom.current = true;
+      }
     }
   }, [messages, streamingMessages]);
 
@@ -103,6 +109,7 @@ export function MessageList({
     if (!scrollContainerRef.current || !hasMore || loadingMore || !onLoadMore) return;
     const { scrollTop } = scrollContainerRef.current;
     if (scrollTop < 100) {
+      isLoadingOlder.current = true;
       onLoadMore();
     }
   }, [hasMore, loadingMore, onLoadMore, checkIfPinned]);
