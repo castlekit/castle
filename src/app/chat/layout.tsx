@@ -60,7 +60,7 @@ export default function ChatLayout({
             <div className="shrink-0 px-3 pb-3">
               <button
                 onClick={() => setShowArchived(true)}
-                className="flex items-center gap-2 w-full px-2 py-2 text-xs text-foreground-secondary hover:text-foreground transition-colors cursor-pointer rounded-lg hover:bg-surface-hover"
+                className="flex items-center justify-center gap-2 w-full px-2 py-2 text-xs text-foreground-secondary hover:text-foreground transition-colors cursor-pointer rounded-lg hover:bg-surface-hover"
               >
                 <Archive className="h-3.5 w-3.5" />
                 Archived channels

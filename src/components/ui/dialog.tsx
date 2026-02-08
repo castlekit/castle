@@ -7,17 +7,23 @@ import { cn } from "@/lib/utils";
 export interface DialogProps extends HTMLAttributes<HTMLDivElement> {
   open?: boolean;
   onClose?: () => void;
+  onOpenChange?: (open: boolean) => void;
 }
 
 const Dialog = forwardRef<HTMLDivElement, DialogProps>(
-  ({ className, open = false, onClose, children, ...props }, ref) => {
+  ({ className, open = false, onClose, onOpenChange, children, ...props }, ref) => {
     if (!open) return null;
+
+    const handleClose = () => {
+      onClose?.();
+      onOpenChange?.(false);
+    };
 
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center">
         <div
           className="fixed inset-0 bg-black/50 backdrop-blur-sm"
-          onClick={onClose}
+          onClick={handleClose}
         />
         <div
           className={cn(
@@ -27,9 +33,9 @@ const Dialog = forwardRef<HTMLDivElement, DialogProps>(
           ref={ref}
           {...props}
         >
-          {onClose && (
+          {(onClose || onOpenChange) && (
             <button
-              onClick={onClose}
+              onClick={handleClose}
               className="absolute right-4 top-4 p-1 rounded-[var(--radius-sm)] text-foreground-muted hover:text-foreground hover:bg-surface-hover transition-colors"
             >
               <X className="h-4 w-4" />

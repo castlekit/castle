@@ -103,7 +103,7 @@ export function ArchivedChannels({
             {channels.map((channel) => (
               <div
                 key={channel.id}
-                className="flex items-center justify-between px-3 py-2.5 rounded-lg hover:bg-surface-hover group"
+                className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-surface-hover/50 hover:bg-surface-hover group"
               >
                 <div className="flex items-center gap-2.5 min-w-0">
                   <MessageCircle className="h-4 w-4 shrink-0 text-foreground-secondary" />

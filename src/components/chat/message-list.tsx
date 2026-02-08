@@ -121,10 +121,14 @@ export function MessageList({
 
   const sortedSessions = [...sessions].sort((a, b) => a.startedAt - b.startedAt);
 
+  // Count distinct days in the message set
+  const distinctDays = new Set(messages.map((m) => getDateKey(m.createdAt)));
+  const showDateSeparators = distinctDays.size > 1 || messages.length > 50;
+
   for (const message of messages) {
-    // Insert date separator when the day changes
+    // Insert date separator when the day changes (skip if only one day and ≤50 messages)
     const dateKey = getDateKey(message.createdAt);
-    if (dateKey !== currentDateKey) {
+    if (showDateSeparators && dateKey !== currentDateKey) {
       groupedContent.push({
         type: "date",
         label: formatDateLabel(message.createdAt),
