@@ -124,8 +124,10 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
   }, [selectedIndex]);
 
   const navigateToResult = (result: SearchResult) => {
-    onClose();
     router.push(result.href);
+    // Close after navigation is dispatched — ensures router.push isn't
+    // interrupted by the dialog unmounting
+    setTimeout(onClose, 0);
   };
 
   if (!open) return null;

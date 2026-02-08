@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState, useEffect } from "react";
+import { use, useState, useEffect, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { WifiOff, X, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -179,7 +179,9 @@ export default function ChannelPage({ params }: ChannelPageProps) {
 
   return (
     <ChatErrorBoundary>
-      <ChannelChatContent channelId={channelId} />
+      <Suspense>
+        <ChannelChatContent channelId={channelId} />
+      </Suspense>
     </ChatErrorBoundary>
   );
 }
