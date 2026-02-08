@@ -62,7 +62,7 @@ export function MessageBubble({
     : undefined;
 
   return (
-    <div className={cn("flex gap-3 rounded-lg", showHeader ? "mt-4 first:mt-0" : "mt-0.5 pl-[48px]", highlighted && "animate-highlight-flash")}>
+    <div className={cn("flex gap-3 rounded-lg", showHeader ? "mt-4 first:mt-0" : "mt-0.5 pl-[48px]", highlighted && "bg-accent/10 -mx-2 px-2 py-1")}>
       {/* Avatar — only shown on first message in a group */}
       {showHeader && (
         <div className="mt-0.5">

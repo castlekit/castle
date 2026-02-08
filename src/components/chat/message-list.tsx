@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useLayoutEffect, useRef, useCallback } from "react";
+import { useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { Bot, CalendarDays, Loader2, MessageSquare } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
 import { SessionDivider } from "./session-divider";
@@ -114,11 +114,10 @@ export function MessageList({
     }
   }, [messages, agentStatuses, channelId]);
 
-  // Track which message ID is currently highlighted (for flash animation)
-  const [highlightedId, setHighlightedId] = useState<string | null>(null);
+  // Scroll to highlighted message when it appears in the DOM.
+  // The message stays highlighted as long as ?m= is in the URL.
   const highlightHandled = useRef<string | null>(null);
 
-  // Scroll to highlighted message when it appears in the DOM
   useEffect(() => {
     if (!highlightMessageId || highlightMessageId === highlightHandled.current) return;
     if (messages.length === 0) return;
@@ -126,12 +125,8 @@ export function MessageList({
     const el = document.getElementById(`msg-${highlightMessageId}`);
     if (el) {
       highlightHandled.current = highlightMessageId;
-      // Delay slightly so layout settles
       requestAnimationFrame(() => {
         el.scrollIntoView({ behavior: "smooth", block: "center" });
-        setHighlightedId(highlightMessageId);
-        // Clear highlight after animation (2s)
-        setTimeout(() => setHighlightedId(null), 2000);
       });
     } else if (hasMore && onLoadMore) {
       // Message not in loaded set — load more
@@ -405,7 +400,7 @@ export function MessageList({
                 showHeader={!isSameSender}
                 agentStatus={message.senderType === "agent" ? getAgentStatus(message.senderId) : undefined}
                 userStatus={message.senderType === "user" ? userStatus : undefined}
-                highlighted={highlightedId === message.id}
+                highlighted={highlightMessageId === message.id}
               />
             </div>
           );
