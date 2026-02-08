@@ -88,6 +88,17 @@ function clearIdleTimer(agentId: string) {
 }
 
 // ============================================================================
+// Channel tracking: which channel each agent is currently thinking in
+// ============================================================================
+
+const thinkingChannels = new Map<string, string>();
+
+/** Returns the channelId the agent is currently thinking in, or undefined. */
+export function getThinkingChannel(agentId: string): string | undefined {
+  return thinkingChannels.get(agentId);
+}
+
+// ============================================================================
 // Exported setters (optimistic SWR + DB persist + cross-tab broadcast)
 // ============================================================================
 
@@ -112,18 +123,21 @@ function updateStatus(agentId: string, status: AgentStatus) {
   });
 }
 
-export function setAgentThinking(agentId: string) {
+export function setAgentThinking(agentId: string, channelId?: string) {
   clearIdleTimer(agentId);
+  if (channelId) thinkingChannels.set(agentId, channelId);
   updateStatus(agentId, "thinking");
 }
 
 export function setAgentActive(agentId: string) {
+  thinkingChannels.delete(agentId);
   updateStatus(agentId, "active");
   // Schedule automatic idle transition after 2 minutes
   scheduleIdleTransition(agentId);
 }
 
 export function setAgentIdle(agentId: string) {
+  thinkingChannels.delete(agentId);
   clearIdleTimer(agentId);
   updateStatus(agentId, "idle");
 }
@@ -184,6 +198,7 @@ export function useAgentStatus() {
   );
 
   return {
+    statuses: statuses ?? {},
     getStatus,
     setThinking: setAgentThinking,
     setActive: setAgentActive,

@@ -161,6 +161,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
         userAvatar={userAvatar}
         streamingMessages={streamingMessages}
         onLoadMore={loadMore}
+        channelId={channelId}
         channelName={channelName}
         channelCreatedAt={channelCreatedAt}
       />

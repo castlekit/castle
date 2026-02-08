@@ -5,9 +5,55 @@ import { Bot, CalendarDays, Loader2, MessageSquare } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
 import { SessionDivider } from "./session-divider";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
-import { useAgentStatus, USER_STATUS_ID } from "@/lib/hooks/use-agent-status";
+import { useAgentStatus, setAgentActive, getThinkingChannel, USER_STATUS_ID } from "@/lib/hooks/use-agent-status";
 import type { ChatMessage, ChannelSession, StreamingMessage } from "@/lib/types/chat";
 import type { AgentInfo } from "./agent-mention-popup";
+
+// ---------------------------------------------------------------------------
+// Reusable typing indicator (bouncing dots with agent avatar)
+// ---------------------------------------------------------------------------
+
+function TypingIndicator({
+  agentId,
+  agentName,
+  agentAvatar,
+}: {
+  agentId: string;
+  agentName?: string;
+  agentAvatar?: string | null;
+}) {
+  const { getStatus } = useAgentStatus();
+  const status = getStatus(agentId);
+  const avatarStatus = ({ thinking: "away", active: "online", idle: "offline" } as const)[status];
+
+  return (
+    <div className="flex gap-3 mt-4">
+      <div className="mt-0.5">
+        <Avatar size="sm" status={avatarStatus} statusPulse={status === "thinking"}>
+          {agentAvatar ? (
+            <AvatarImage src={agentAvatar} alt={agentName || "Agent"} />
+          ) : (
+            <AvatarFallback className="bg-accent/20 text-accent">
+              <Bot className="w-4 h-4" />
+            </AvatarFallback>
+          )}
+        </Avatar>
+      </div>
+      <div className="flex flex-col">
+        <div className="flex items-center gap-2 mb-0.5">
+          <span className="font-bold text-[15px] text-foreground">
+            {agentName || agentId}
+          </span>
+        </div>
+        <div className="flex items-center gap-1 py-1">
+          <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce [animation-delay:-0.3s]" />
+          <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce [animation-delay:-0.15s]" />
+          <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce" />
+        </div>
+      </div>
+    </div>
+  );
+}
 
 interface MessageListProps {
   messages: ChatMessage[];
@@ -19,6 +65,7 @@ interface MessageListProps {
   userAvatar?: string | null;
   streamingMessages?: Map<string, StreamingMessage>;
   onLoadMore?: () => void;
+  channelId?: string;
   channelName?: string | null;
   channelCreatedAt?: number | null;
 }
@@ -33,11 +80,38 @@ export function MessageList({
   userAvatar,
   streamingMessages,
   onLoadMore,
+  channelId,
   channelName,
   channelCreatedAt,
 }: MessageListProps) {
-  const { getStatus: getAgentStatus } = useAgentStatus();
+  const { statuses: agentStatuses, getStatus: getAgentStatus } = useAgentStatus();
   const userStatus = getAgentStatus(USER_STATUS_ID);
+
+  // Clear stale "thinking" status on mount/update.
+  // If the agent finished its response while the user was on another page,
+  // the SSE listener was closed so setAgentActive() never fired.
+  // Detect this by checking if the "thinking" agent already has a completed
+  // message after the last user message, and transition them to "active".
+  // IMPORTANT: only check agents that are thinking in THIS channel to avoid
+  // clearing a thinking status that belongs to a different channel.
+  useEffect(() => {
+    if (messages.length === 0) return;
+    for (const [agentId, status] of Object.entries(agentStatuses)) {
+      if (status !== "thinking" || agentId === USER_STATUS_ID) continue;
+      // Only clear if the agent is thinking in this specific channel
+      const thinkingIn = getThinkingChannel(agentId);
+      if (thinkingIn && thinkingIn !== channelId) continue;
+      const lastUserIdx = messages.findLastIndex((m) => m.senderType === "user");
+      const lastAgentIdx = messages.findLastIndex(
+        (m) => m.senderType === "agent" && m.senderId === agentId
+      );
+      if (lastAgentIdx > lastUserIdx) {
+        // Agent already responded — clear the stale "thinking" status
+        setAgentActive(agentId);
+      }
+    }
+  }, [messages, agentStatuses, channelId]);
+
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -312,42 +386,57 @@ export function MessageList({
         {streamingMessages &&
           Array.from(streamingMessages.values())
             .filter((sm) => !messages.some((m) => m.runId === sm.runId && m.senderType === "agent"))
-            .map((sm) => {
-              const avatarSrc = getAgentAvatar(sm.agentId);
-              const name = sm.agentName || getAgentName(sm.agentId);
-              const status = getAgentStatus(sm.agentId);
-              const avatarStatus = ({ thinking: "away", active: "online", idle: "offline" } as const)[status];
-              return (
-                <div
-                  key={`streaming-${sm.runId}`}
-                  className="flex gap-3 mt-4"
-                >
-                  <div className="mt-0.5">
-                    <Avatar size="sm" status={avatarStatus} statusPulse={status === "thinking"}>
-                      {avatarSrc ? (
-                        <AvatarImage src={avatarSrc} alt={name || "Agent"} />
-                      ) : (
-                        <AvatarFallback className="bg-accent/20 text-accent">
-                          <Bot className="w-4 h-4" />
-                        </AvatarFallback>
-                      )}
-                    </Avatar>
-                  </div>
-                  <div className="flex flex-col">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <span className="font-bold text-[15px] text-foreground">
-                        {name}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1 py-1">
-                      <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce [animation-delay:-0.3s]" />
-                      <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce [animation-delay:-0.15s]" />
-                      <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce" />
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
+            .map((sm) => (
+              <TypingIndicator
+                key={`streaming-${sm.runId}`}
+                agentId={sm.agentId}
+                agentName={sm.agentName || getAgentName(sm.agentId)}
+                agentAvatar={getAgentAvatar(sm.agentId)}
+              />
+            ))}
+
+        {/* Fallback: show dots for agents in "thinking" state without active streaming.
+            This covers the case where the user navigated away and came back —
+            streamingMessages is empty but the agent status is still "thinking" in the DB.
+            We iterate agentStatuses directly instead of the agents prop because the
+            agents list (from useOpenClaw) may still be empty on the first render if
+            the gateway connection hasn't been confirmed yet. */}
+        {Object.entries(agentStatuses)
+          .filter(([agentId, status]) => {
+            if (status !== "thinking" || agentId === USER_STATUS_ID) return false;
+            // Only show indicator for agents thinking in THIS channel
+            const thinkingIn = getThinkingChannel(agentId);
+            if (thinkingIn && thinkingIn !== channelId) return false;
+            // Skip if already shown via streaming messages above
+            if (streamingMessages?.size) {
+              const alreadyStreaming = Array.from(streamingMessages.values())
+                .some((sm) => sm.agentId === agentId);
+              if (alreadyStreaming) return false;
+            }
+            // Skip if agent already responded after the last user message
+            const lastUserIdx = messages.findLastIndex((m) => m.senderType === "user");
+            const lastAgentIdx = messages.findLastIndex(
+              (m) => m.senderType === "agent" && m.senderId === agentId
+            );
+            if (lastAgentIdx > lastUserIdx) return false;
+            return true;
+          })
+          .map(([agentId]) => {
+            // Try to get display info from the agents prop first, then from messages
+            const agentInfo = agents.find((a) => a.id === agentId);
+            const fallbackName = agentInfo?.name
+              || messages.findLast((m) => m.senderType === "agent" && m.senderId === agentId)?.senderName
+              || agentId;
+            const fallbackAvatar = agentInfo?.avatar ?? null;
+            return (
+              <TypingIndicator
+                key={`thinking-${agentId}`}
+                agentId={agentId}
+                agentName={fallbackName}
+                agentAvatar={fallbackAvatar}
+              />
+            );
+          })}
 
         <div ref={bottomRef} />
       </div>
