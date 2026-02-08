@@ -1,12 +1,15 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { readFileSync, writeFileSync, mkdirSync, existsSync, chmodSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
+import { platform } from "os";
 import JSON5 from "json5";
 
 export interface CastleConfig {
   openclaw: {
     gateway_port: number;
     gateway_token?: string;
+    gateway_url?: string;   // Full WebSocket URL for remote Gateways (e.g. ws://192.168.1.50:18789)
+    is_remote?: boolean;    // True when connecting to a non-local Gateway
     primary_agent?: string;
   };
   server: {
@@ -34,11 +37,28 @@ export function getConfigPath(): string {
 export function ensureCastleDir(): void {
   const dir = getCastleDir();
   if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
+  // Tighten existing directories that may have been created with default perms
+  if (platform() !== "win32") {
+    try { chmodSync(dir, 0o700); } catch { /* ignore */ }
   }
   const dataDir = join(dir, "data");
   if (!existsSync(dataDir)) {
-    mkdirSync(dataDir, { recursive: true });
+    mkdirSync(dataDir, { recursive: true, mode: 0o700 });
+  }
+  const logsDir = join(dir, "logs");
+  if (!existsSync(logsDir)) {
+    mkdirSync(logsDir, { recursive: true, mode: 0o700 });
+  }
+  // Tighten log file permissions — LaunchAgent creates them with default umask
+  if (platform() !== "win32") {
+    for (const logFile of ["server.log", "server.err"]) {
+      const logPath = join(logsDir, logFile);
+      if (existsSync(logPath)) {
+        try { chmodSync(logPath, 0o600); } catch { /* ignore */ }
+      }
+    }
   }
 }
 
@@ -70,6 +90,14 @@ export function writeConfig(config: CastleConfig): void {
   const configPath = getConfigPath();
   const content = JSON5.stringify(config, null, 2);
   writeFileSync(configPath, content, "utf-8");
+  // Restrict permissions — castle.json may contain gateway_token
+  if (platform() !== "win32") {
+    try {
+      chmodSync(configPath, 0o600);
+    } catch {
+      // May fail on some filesystems
+    }
+  }
 }
 
 /**
@@ -177,13 +205,17 @@ export function readOpenClawPort(): number | null {
 
 /**
  * Get the Gateway WebSocket URL.
- * Supports OPENCLAW_GATEWAY_URL env var, falls back to config port.
+ * Priority: env var > config gateway_url > config port on localhost.
  */
 export function getGatewayUrl(): string {
   if (process.env.OPENCLAW_GATEWAY_URL) {
     return process.env.OPENCLAW_GATEWAY_URL;
   }
   const config = readConfig();
+  // Explicit URL takes priority (remote Gateways, Tailscale, etc.)
+  if (config.openclaw.gateway_url) {
+    return config.openclaw.gateway_url;
+  }
   return `ws://127.0.0.1:${config.openclaw.gateway_port}`;
 }
 

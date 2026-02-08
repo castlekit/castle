@@ -4,6 +4,34 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 /**
+ * Strip sensitive fields (tokens, keys) from event payloads
+ * before forwarding to the browser.
+ */
+function redactEventPayload(evt: GatewayEvent): GatewayEvent {
+  if (!evt.payload || typeof evt.payload !== "object") return evt;
+
+  const payload = { ...(evt.payload as Record<string, unknown>) };
+
+  // Redact deviceToken from pairing events
+  if (typeof payload.deviceToken === "string") {
+    payload.deviceToken = "[REDACTED]";
+  }
+  // Redact nested auth.deviceToken
+  if (payload.auth && typeof payload.auth === "object") {
+    const auth = { ...(payload.auth as Record<string, unknown>) };
+    if (typeof auth.deviceToken === "string") auth.deviceToken = "[REDACTED]";
+    if (typeof auth.token === "string") auth.token = "[REDACTED]";
+    payload.auth = auth;
+  }
+  // Redact any top-level token field
+  if (typeof payload.token === "string") {
+    payload.token = "[REDACTED]";
+  }
+
+  return { ...evt, payload };
+}
+
+/**
  * GET /api/openclaw/events
  * SSE endpoint -- streams OpenClaw Gateway events to the browser in real-time.
  * Browser connects once via EventSource and receives push updates.
@@ -27,11 +55,12 @@ export async function GET() {
       };
       controller.enqueue(encoder.encode(`data: ${JSON.stringify(initial)}\n\n`));
 
-      // Forward gateway events
+      // Forward gateway events (with sensitive fields redacted)
       const onGatewayEvent = (evt: GatewayEvent) => {
         if (closed) return;
         try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(evt)}\n\n`));
+          const safe = redactEventPayload(evt);
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(safe)}\n\n`));
         } catch {
           // Stream may have closed
         }

@@ -14,6 +14,8 @@ import {
   writeConfig,
   type CastleConfig,
 } from "../lib/config.js";
+// Device identity is handled by gateway-connection.ts for the persistent connection.
+// The onboarding wizard uses simple token-only auth for agent discovery.
 
 // Read version from package.json at the project root
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -56,9 +58,15 @@ interface DiscoveredAgent {
 
 /**
  * Connect to Gateway and discover agents via agents.list.
+ * Supports both port-based (local) and full URL (remote) connections.
  * Returns the list of agents or an empty array on failure.
  */
-async function discoverAgents(port: number, token: string | null): Promise<DiscoveredAgent[]> {
+async function discoverAgents(
+  portOrUrl: number | string,
+  token: string | null
+): Promise<DiscoveredAgent[]> {
+  const wsUrl = typeof portOrUrl === "string" ? portOrUrl : `ws://127.0.0.1:${portOrUrl}`;
+
   return new Promise((resolve) => {
     const timeout = setTimeout(() => {
       try { ws.close(); } catch { /* ignore */ }
@@ -67,7 +75,7 @@ async function discoverAgents(port: number, token: string | null): Promise<Disco
 
     let ws: WebSocket;
     try {
-      ws = new WebSocket(`ws://127.0.0.1:${port}`);
+      ws = new WebSocket(wsUrl);
     } catch {
       clearTimeout(timeout);
       resolve([]);
@@ -81,6 +89,8 @@ async function discoverAgents(port: number, token: string | null): Promise<Disco
 
     ws.on("open", () => {
       // Send connect handshake
+      // NOTE: No device identity here — discoverAgents is just for listing agents
+      // during setup. Device auth happens in gateway-connection.ts for the real connection.
       const connectId = randomUUID();
       const connectFrame = {
         type: "req",
@@ -147,6 +157,137 @@ async function discoverAgents(port: number, token: string | null): Promise<Disco
       });
     });
   });
+}
+
+/**
+ * Test a Gateway connection. Returns true if connection succeeds.
+ */
+async function testConnection(
+  portOrUrl: number | string,
+  token: string | null
+): Promise<boolean> {
+  const wsUrl = typeof portOrUrl === "string" ? portOrUrl : `ws://127.0.0.1:${portOrUrl}`;
+
+  return new Promise((resolve) => {
+    const timeout = setTimeout(() => {
+      try { ws.close(); } catch { /* ignore */ }
+      resolve(false);
+    }, 5000);
+
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(wsUrl);
+    } catch {
+      clearTimeout(timeout);
+      resolve(false);
+      return;
+    }
+
+    ws.on("error", () => {
+      clearTimeout(timeout);
+      resolve(false);
+    });
+
+    ws.on("open", () => {
+      clearTimeout(timeout);
+      ws.close();
+      resolve(true);
+    });
+  });
+}
+
+/**
+ * Prompt for manual Gateway configuration (remote or local).
+ * Returns connection details or null if cancelled.
+ */
+async function promptManualGateway(): Promise<{
+  port: number;
+  token: string | null;
+  gatewayUrl?: string;
+  isRemote: boolean;
+} | null> {
+  const locationType = await p.select({
+    message: "Where is your OpenClaw Gateway?",
+    options: [
+      {
+        value: "local",
+        label: "Local machine",
+        hint: "Running on this device (127.0.0.1)",
+      },
+      {
+        value: "remote",
+        label: "Remote / Tailscale",
+        hint: "Running on another machine",
+      },
+    ],
+  });
+
+  if (p.isCancel(locationType)) return null;
+
+  let port = 18789;
+  let gatewayUrl: string | undefined;
+  const isRemote = locationType === "remote";
+
+  if (isRemote) {
+    const urlInput = await p.text({
+      message: "Gateway WebSocket URL",
+      placeholder: "ws://192.168.1.50:18789",
+      validate(value: string | undefined) {
+        if (!value?.trim()) return "URL is required";
+        if (!value.startsWith("ws://") && !value.startsWith("wss://")) {
+          return "URL must start with ws:// or wss://";
+        }
+      },
+    });
+
+    if (p.isCancel(urlInput)) return null;
+    gatewayUrl = urlInput as string;
+
+    // Extract port from URL for config compatibility
+    try {
+      const parsed = new URL(gatewayUrl);
+      port = parseInt(parsed.port, 10) || 18789;
+    } catch {
+      port = 18789;
+    }
+
+    // Test the connection
+    const testSpinner = p.spinner();
+    testSpinner.start("Testing connection...");
+    const ok = await testConnection(gatewayUrl, null);
+    if (ok) {
+      testSpinner.stop(`\x1b[92m✔\x1b[0m Gateway reachable`);
+    } else {
+      testSpinner.stop(pc.dim("Could not reach Gateway — it may not be running yet"));
+    }
+  } else {
+    const gatewayPort = await p.text({
+      message: "OpenClaw Gateway port",
+      initialValue: "18789",
+      validate(value: string | undefined) {
+        const num = parseInt(value || "0", 10);
+        if (isNaN(num) || num < 1 || num > 65535) {
+          return "Please enter a valid port number (1-65535)";
+        }
+      },
+    });
+
+    if (p.isCancel(gatewayPort)) return null;
+    port = parseInt(gatewayPort as string, 10);
+  }
+
+  // Token entry
+  const tokenInput = await p.text({
+    message: "Gateway auth token",
+    placeholder: "Paste your token (or press Enter to skip)",
+    defaultValue: "",
+  });
+
+  if (p.isCancel(tokenInput)) return null;
+
+  const token = (tokenInput as string) || null;
+
+  return { port, token, gatewayUrl, isRemote };
 }
 
 export async function runOnboarding(): Promise<void> {
@@ -253,47 +394,65 @@ export async function runOnboarding(): Promise<void> {
     }
   }
 
-  // Step 2: Auto-detect port and token, only ask if not found
+  // Step 2: Connection mode — auto-detect or manual entry
   let port = readOpenClawPort() || 18789;
   let token = readOpenClawToken();
+  let gatewayUrl: string | undefined;
+  let isRemote = false;
 
-  if (!readOpenClawPort()) {
-    const gatewayPort = await p.text({
-      message: "OpenClaw Gateway port",
-      initialValue: "18789",
-      validate(value: string | undefined) {
-        const num = parseInt(value || "0", 10);
-        if (isNaN(num) || num < 1 || num > 65535) {
-          return "Please enter a valid port number (1-65535)";
-        }
-      },
+  // If we have auto-detected config, offer a choice
+  const hasLocalConfig = !!readOpenClawPort() || isOpenClawInstalled();
+
+  if (hasLocalConfig && token) {
+    // Both auto-detect and manual are available
+    const connectionMode = await p.select({
+      message: "How would you like to connect?",
+      options: [
+        {
+          value: "auto",
+          label: `Auto-detected local Gateway ${pc.dim(`(port ${port})`)}`,
+          hint: "Recommended for local setups",
+        },
+        {
+          value: "manual",
+          label: "Enter Gateway details manually",
+          hint: "For remote, Tailscale, or custom setups",
+        },
+      ],
     });
 
-    if (p.isCancel(gatewayPort)) {
+    if (p.isCancel(connectionMode)) {
       p.cancel("Setup cancelled.");
       process.exit(0);
     }
 
-    port = parseInt(gatewayPort as string, 10);
-  }
-
-  if (!token) {
-    const tokenInput = await p.text({
-      message: "Enter your OpenClaw Gateway token (or press Enter to skip)",
-      placeholder: "Leave empty if no auth is configured",
-      defaultValue: "",
-    });
-
-    if (p.isCancel(tokenInput)) {
+    if (connectionMode === "manual") {
+      const manualResult = await promptManualGateway();
+      if (!manualResult) {
+        p.cancel("Setup cancelled.");
+        process.exit(0);
+      }
+      port = manualResult.port;
+      token = manualResult.token;
+      gatewayUrl = manualResult.gatewayUrl;
+      isRemote = manualResult.isRemote;
+    }
+  } else if (!token) {
+    // No auto-detected token — fall through to manual entry
+    const manualResult = await promptManualGateway();
+    if (!manualResult) {
       p.cancel("Setup cancelled.");
       process.exit(0);
     }
-
-    token = (tokenInput as string) || null;
+    port = manualResult.port;
+    token = manualResult.token;
+    gatewayUrl = manualResult.gatewayUrl;
+    isRemote = manualResult.isRemote;
   }
 
-  // Step 4: Agent Discovery
-  const agents = await discoverAgents(port, token);
+  // Step 3: Agent Discovery (use URL if remote, port if local)
+  const agentTarget = gatewayUrl || port;
+  const agents = await discoverAgents(agentTarget, token);
 
   let primaryAgent: string;
 
@@ -341,6 +500,8 @@ export async function runOnboarding(): Promise<void> {
     openclaw: {
       gateway_port: port,
       gateway_token: token || undefined,
+      gateway_url: gatewayUrl,
+      is_remote: isRemote || undefined,
       primary_agent: primaryAgent,
     },
     server: {
@@ -417,6 +578,10 @@ export async function runOnboarding(): Promise<void> {
     // Nothing on port or lsof not available
   }
 
+  // Escape XML special characters for plist values
+  const xmlEscape = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
   // Install as a persistent service (auto-start on login)
   if (process.platform === "darwin") {
     const plistDir = join(home(), "Library", "LaunchAgents");
@@ -430,14 +595,14 @@ export async function runOnboarding(): Promise<void> {
     <string>com.castlekit.castle</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${nodePath}</string>
-        <string>${nextBin}</string>
+        <string>${xmlEscape(nodePath)}</string>
+        <string>${xmlEscape(nextBin)}</string>
         <string>start</string>
         <string>-p</string>
-        <string>${castlePort}</string>
+        <string>${xmlEscape(castlePort)}</string>
     </array>
     <key>WorkingDirectory</key>
-    <string>${PROJECT_ROOT}</string>
+    <string>${xmlEscape(PROJECT_ROOT)}</string>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>
@@ -446,15 +611,15 @@ export async function runOnboarding(): Promise<void> {
         <false/>
     </dict>
     <key>StandardOutPath</key>
-    <string>${logsDir}/server.log</string>
+    <string>${xmlEscape(logsDir)}/server.log</string>
     <key>StandardErrorPath</key>
-    <string>${logsDir}/server.err</string>
+    <string>${xmlEscape(logsDir)}/server.err</string>
     <key>EnvironmentVariables</key>
     <dict>
         <key>NODE_ENV</key>
         <string>production</string>
         <key>PATH</key>
-        <string>${process.env.PATH}</string>
+        <string>${xmlEscape(process.env.PATH || "")}</string>
     </dict>
 </dict>
 </plist>`;
