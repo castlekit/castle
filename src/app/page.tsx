@@ -10,9 +10,37 @@ import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useOpenClaw, type OpenClawAgent } from "@/lib/hooks/use-openclaw";
+import { useAgentStatus, type AgentStatus } from "@/lib/hooks/use-agent-status";
 
 function getInitials(name: string) {
   return name.slice(0, 2).toUpperCase();
+}
+
+function getStatusLabel(status: AgentStatus, isConnected: boolean): string {
+  if (!isConnected) return "Offline";
+  switch (status) {
+    case "thinking": return "Thinking";
+    case "active": return "Active";
+    default: return "Idle";
+  }
+}
+
+function getStatusBadgeVariant(status: AgentStatus, isConnected: boolean): "success" | "warning" | "outline" {
+  if (!isConnected) return "outline";
+  switch (status) {
+    case "thinking": return "warning";
+    case "active": return "success";
+    default: return "outline";
+  }
+}
+
+function getAvatarStatus(status: AgentStatus, isConnected: boolean): "online" | "offline" | "busy" | "away" {
+  if (!isConnected) return "offline";
+  switch (status) {
+    case "thinking": return "away";
+    case "active": return "online";
+    default: return "offline";
+  }
 }
 
 function AgentCard({
@@ -28,6 +56,8 @@ function AgentCard({
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const { getStatus } = useAgentStatus();
+  const agentStatus = getStatus(agent.id);
 
   const handleAvatarClick = useCallback(() => {
     if (!isConnected) return;
@@ -92,10 +122,10 @@ function AgentCard({
             type="button"
             onClick={handleAvatarClick}
             disabled={!isConnected || uploading}
-            className="relative group rounded-full focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="relative group rounded-[4px] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
             title={isConnected ? "Click to change avatar" : undefined}
           >
-            <Avatar size="md" status={isConnected ? "online" : "offline"}>
+            <Avatar size="md" status={getAvatarStatus(agentStatus, isConnected)} statusPulse={agentStatus === "thinking"}>
               {agent.avatar ? (
                 <AvatarImage
                   src={agent.avatar}
@@ -109,12 +139,12 @@ function AgentCard({
               )}
             </Avatar>
             {isConnected && !uploading && (
-              <div className="absolute inset-0 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+              <div className="absolute inset-0 rounded-[4px] bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
                 <Camera className="h-4 w-4 text-white" />
               </div>
             )}
             {uploading && (
-              <div className="absolute inset-0 rounded-full bg-black/50 flex items-center justify-center">
+              <div className="absolute inset-0 rounded-[4px] bg-black/50 flex items-center justify-center">
                 <Loader2 className="h-4 w-4 text-white animate-spin" />
               </div>
             )}
@@ -146,10 +176,10 @@ function AgentCard({
           </div>
         </div>
         <Badge
-          variant={isConnected ? "success" : "outline"}
+          variant={getStatusBadgeVariant(agentStatus, isConnected)}
           size="sm"
         >
-          {isConnected ? "Active" : "Offline"}
+          {getStatusLabel(agentStatus, isConnected)}
         </Badge>
       </div>
     </Card>

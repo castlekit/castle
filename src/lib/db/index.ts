@@ -25,7 +25,7 @@ const MAX_BACKUPS = 5;
 const CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000;
 
 /** Current schema version — bump when adding new migrations */
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 // ============================================================================
 // Singleton
@@ -333,6 +333,12 @@ const TABLE_SQL = `
     archived_at INTEGER
   );
 
+  CREATE TABLE IF NOT EXISTS agent_statuses (
+    agent_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'idle',
+    updated_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS channel_agents (
     channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
     agent_id TEXT NOT NULL,
@@ -444,6 +450,21 @@ function runMigrations(
   if (!channelColsV3.some((c) => c.name === "archived_at")) {
     console.log("[Castle DB] Migration: adding archived_at to channels");
     sqlite.exec("ALTER TABLE channels ADD COLUMN archived_at INTEGER");
+  }
+
+  // --- Migration 4: Create agent_statuses table ---
+  const agentStatusTable = sqlite
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='agent_statuses'")
+    .get() as { name: string } | undefined;
+  if (!agentStatusTable) {
+    console.log("[Castle DB] Migration: creating agent_statuses table");
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS agent_statuses (
+        agent_id TEXT PRIMARY KEY,
+        status TEXT NOT NULL DEFAULT 'idle',
+        updated_at INTEGER NOT NULL
+      )
+    `);
   }
 
   // Checkpoint after migration to persist changes to main DB file immediately

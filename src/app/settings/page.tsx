@@ -143,7 +143,7 @@ export default function SettingsPage() {
                   <div className="flex items-center gap-4">
                     {/* Avatar preview */}
                     <div className="relative group">
-                      <div className="w-20 h-20 rounded-full overflow-hidden bg-surface-hover border-2 border-border flex items-center justify-center">
+                      <div className="w-20 h-20 rounded-[4px] overflow-hidden bg-surface-hover border-2 border-border flex items-center justify-center">
                         {uploadingAvatar ? (
                           <Loader2 className="h-6 w-6 animate-spin text-foreground-secondary" />
                         ) : avatarUrl ? (
@@ -160,7 +160,7 @@ export default function SettingsPage() {
                       <button
                         onClick={() => fileInputRef.current?.click()}
                         disabled={uploadingAvatar}
-                        className="absolute inset-0 w-20 h-20 rounded-full bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
+                        className="absolute inset-0 w-20 h-20 rounded-[4px] bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
                       >
                         <Camera className="h-5 w-5 text-white" />
                       </button>

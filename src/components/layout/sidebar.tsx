@@ -17,6 +17,8 @@ import { cn } from "@/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useUserSettings } from "@/lib/hooks/use-user-settings";
+import { useAgentStatus, USER_STATUS_ID } from "@/lib/hooks/use-agent-status";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 
 interface NavItem {
   id: string;
@@ -69,7 +71,7 @@ function Sidebar({
   return (
     <aside
       className={cn(
-        "fixed top-[20px] left-[24px] bottom-[20px] flex flex-col z-40 rounded-[28px] w-14",
+        "fixed top-[20px] left-[24px] bottom-[20px] flex flex-col z-40 rounded-[var(--radius-md)] w-14",
         variant === "glass" ? "glass" : "bg-surface border border-border",
         className
       )}
@@ -104,7 +106,7 @@ function Sidebar({
             <Link
               href={item.href}
               className={cn(
-                "flex items-center justify-center w-full rounded-[20px] p-2.5 cursor-pointer",
+                "flex items-center justify-center w-full rounded-[4px] p-2.5 cursor-pointer",
                 isActive
                   ? "bg-accent/10 text-accent"
                   : "text-foreground-secondary hover:text-foreground hover:bg-surface-hover"
@@ -116,7 +118,7 @@ function Sidebar({
             <button
               onClick={() => onNavigate?.(item.id)}
               className={cn(
-                "flex items-center justify-center w-full rounded-[20px] p-2.5 cursor-pointer",
+                "flex items-center justify-center w-full rounded-[4px] p-2.5 cursor-pointer",
                 isActive
                   ? "bg-accent/10 text-accent"
                   : "text-foreground-secondary hover:text-foreground hover:bg-surface-hover"
@@ -148,6 +150,9 @@ function SidebarUserMenu() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const { avatarUrl } = useUserSettings();
+  const { getStatus } = useAgentStatus();
+  const userStatus = getStatus(USER_STATUS_ID);
+  const avatarDotStatus = userStatus === "active" ? "online" as const : "offline" as const;
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -170,21 +175,21 @@ function SidebarUserMenu() {
     <div ref={menuRef} className="relative flex justify-center pb-[10px]">
       <button
         onClick={() => setOpen(!open)}
-        className="group flex items-center justify-center rounded-full cursor-pointer overflow-hidden transition-opacity"
+        className="group flex items-center justify-center rounded-[4px] cursor-pointer overflow-hidden transition-opacity"
       >
-        <div className="w-9 h-9 shrink-0 rounded-full overflow-hidden">
+        <Avatar size="sm" status={avatarDotStatus}>
           {avatarUrl ? (
-            <img
+            <AvatarImage
               src={avatarUrl}
               alt="You"
-              className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition-all duration-200"
+              className="grayscale group-hover:grayscale-0 transition-all duration-200"
             />
           ) : (
-            <div className="w-full h-full flex items-center justify-center text-foreground-secondary">
+            <AvatarFallback className="text-foreground-secondary">
               <User className="h-5 w-5" />
-            </div>
+            </AvatarFallback>
           )}
-        </div>
+        </Avatar>
       </button>
 
       {open && (

@@ -25,6 +25,16 @@ export const settings = sqliteTable("settings", {
 });
 
 // ============================================================================
+// agent_statuses (live agent activity state)
+// ============================================================================
+
+export const agentStatuses = sqliteTable("agent_statuses", {
+  agentId: text("agent_id").primaryKey(),
+  status: text("status").notNull().default("idle"), // "idle" | "thinking" | "active"
+  updatedAt: integer("updated_at").notNull(), // unix ms
+});
+
+// ============================================================================
 // channel_agents (many-to-many junction)
 // ============================================================================
 

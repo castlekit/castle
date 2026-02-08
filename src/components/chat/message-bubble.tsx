@@ -3,10 +3,12 @@
 import React from "react";
 import { Bot, User, AlertTriangle, StopCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { MarkdownContent } from "./markdown-content";
 import { TwemojiText } from "@/components/ui/twemoji-text";
 import type { ChatMessage } from "@/lib/types/chat";
 import type { AgentInfo } from "./agent-mention-popup";
+import type { AgentStatus } from "@/lib/hooks/use-agent-status";
 
 interface MessageBubbleProps {
   message: ChatMessage;
@@ -18,6 +20,8 @@ interface MessageBubbleProps {
   isStreaming?: boolean;
   /** Whether to show avatar and name (false for consecutive messages from same sender) */
   showHeader?: boolean;
+  agentStatus?: AgentStatus;
+  userStatus?: AgentStatus;
 }
 
 export function MessageBubble({
@@ -29,6 +33,8 @@ export function MessageBubble({
   agents,
   isStreaming,
   showHeader = true,
+  agentStatus,
+  userStatus,
 }: MessageBubbleProps) {
   const formattedTime = new Date(message.createdAt).toLocaleTimeString([], {
     hour: "numeric",
@@ -43,31 +49,35 @@ export function MessageBubble({
   };
 
   const displayName = isAgent ? getAgentDisplayName() : "You";
-  const avatar = isAgent ? agentAvatar : userAvatar;
+  const avatarSrc = isAgent ? agentAvatar : userAvatar;
   const hasAttachments = message.attachments && message.attachments.length > 0;
+
+  // Map status to Avatar status prop
+  const avatarStatus = isAgent && agentStatus
+    ? ({ thinking: "away", active: "online", idle: "offline" } as const)[agentStatus]
+    : !isAgent && userStatus
+    ? ({ active: "online", idle: "offline", thinking: "away" } as const)[userStatus]
+    : undefined;
 
   return (
     <div className={cn("flex gap-3", showHeader ? "mt-4 first:mt-0" : "mt-0.5 pl-[48px]")}>
       {/* Avatar — only shown on first message in a group */}
       {showHeader && (
-        <>
-          {avatar ? (
-            <img
-              src={avatar}
-              alt={displayName}
-              className="w-9 h-9 rounded-[4px] shrink-0 object-cover mt-0.5"
-            />
-          ) : (
-            <div
-              className={cn(
-                "flex items-center justify-center w-9 h-9 rounded-[4px] shrink-0 mt-0.5",
-                isAgent ? "bg-accent/20 text-accent" : "bg-foreground/10 text-foreground"
-              )}
-            >
-              {isAgent ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
-            </div>
-          )}
-        </>
+        <div className="mt-0.5">
+          <Avatar size="sm" status={avatarStatus} statusPulse={agentStatus === "thinking"}>
+            {avatarSrc ? (
+              <AvatarImage src={avatarSrc} alt={displayName} />
+            ) : (
+              <AvatarFallback
+                className={cn(
+                  isAgent ? "bg-accent/20 text-accent" : "bg-foreground/10 text-foreground"
+                )}
+              >
+                {isAgent ? <Bot className="w-4 h-4" /> : <User className="w-4 h-4" />}
+              </AvatarFallback>
+            )}
+          </Avatar>
+        </div>
       )}
 
       {/* Message content */}

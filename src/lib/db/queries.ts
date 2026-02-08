@@ -9,6 +9,7 @@ import {
   messageAttachments,
   messageReactions,
   settings,
+  agentStatuses,
 } from "./schema";
 import type {
   Channel,
@@ -732,6 +733,59 @@ export function setSetting(key: string, value: string): void {
   } else {
     db.insert(settings)
       .values({ key, value, updatedAt: Date.now() })
+      .run();
+  }
+}
+
+// ============================================================================
+// Agent Statuses
+// ============================================================================
+
+const ACTIVE_DURATION_MS = 2 * 60 * 1000; // 2 minutes
+
+export type AgentStatusValue = "idle" | "thinking" | "active";
+
+export interface AgentStatusRow {
+  agentId: string;
+  status: AgentStatusValue;
+  updatedAt: number;
+}
+
+/**
+ * Get all agent statuses. If an agent's status is "active" but updated_at
+ * is more than 2 minutes ago, it's returned as "idle" instead.
+ */
+export function getAgentStatuses(): AgentStatusRow[] {
+  const db = getDb();
+  const rows = db.select().from(agentStatuses).all();
+  const now = Date.now();
+
+  return rows.map((row) => {
+    const status = row.status as AgentStatusValue;
+    // Auto-expire "active" status after 2 minutes
+    if (status === "active" && now - row.updatedAt > ACTIVE_DURATION_MS) {
+      return { agentId: row.agentId, status: "idle" as AgentStatusValue, updatedAt: row.updatedAt };
+    }
+    return { agentId: row.agentId, status, updatedAt: row.updatedAt };
+  });
+}
+
+/**
+ * Set an agent's status. Upserts the row.
+ */
+export function setAgentStatus(agentId: string, status: AgentStatusValue): void {
+  const db = getDb();
+  const now = Date.now();
+
+  const existing = db.select().from(agentStatuses).where(eq(agentStatuses.agentId, agentId)).get();
+  if (existing) {
+    db.update(agentStatuses)
+      .set({ status, updatedAt: now })
+      .where(eq(agentStatuses.agentId, agentId))
+      .run();
+  } else {
+    db.insert(agentStatuses)
+      .values({ agentId, status, updatedAt: now })
       .run();
   }
 }

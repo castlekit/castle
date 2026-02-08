@@ -4,6 +4,8 @@ import { useEffect, useLayoutEffect, useRef, useCallback } from "react";
 import { Bot, CalendarDays, Loader2, MessageSquare } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
 import { SessionDivider } from "./session-divider";
+import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { useAgentStatus, USER_STATUS_ID } from "@/lib/hooks/use-agent-status";
 import type { ChatMessage, ChannelSession, StreamingMessage } from "@/lib/types/chat";
 import type { AgentInfo } from "./agent-mention-popup";
 
@@ -34,6 +36,8 @@ export function MessageList({
   channelName,
   channelCreatedAt,
 }: MessageListProps) {
+  const { getStatus: getAgentStatus } = useAgentStatus();
+  const userStatus = getAgentStatus(USER_STATUS_ID);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -298,6 +302,8 @@ export function MessageList({
               userAvatar={userAvatar}
               agents={agents}
               showHeader={!isSameSender}
+              agentStatus={message.senderType === "agent" ? getAgentStatus(message.senderId) : undefined}
+              userStatus={message.senderType === "user" ? userStatus : undefined}
             />
           );
         })}
@@ -307,26 +313,28 @@ export function MessageList({
           Array.from(streamingMessages.values())
             .filter((sm) => !messages.some((m) => m.runId === sm.runId && m.senderType === "agent"))
             .map((sm) => {
-              const avatar = getAgentAvatar(sm.agentId);
+              const avatarSrc = getAgentAvatar(sm.agentId);
               const name = sm.agentName || getAgentName(sm.agentId);
+              const status = getAgentStatus(sm.agentId);
+              const avatarStatus = ({ thinking: "away", active: "online", idle: "offline" } as const)[status];
               return (
                 <div
                   key={`streaming-${sm.runId}`}
                   className="flex gap-3 mt-4"
                 >
-                  {avatar ? (
-                    <img
-                      src={avatar}
-                      alt={name || "Agent"}
-                      className="w-9 h-9 rounded-[4px] shrink-0 object-cover mt-0.5"
-                    />
-                  ) : (
-                    <div className="flex items-center justify-center w-9 h-9 rounded-[4px] shrink-0 bg-accent/20 text-accent mt-0.5">
-                      <Bot className="w-4 h-4" />
-                    </div>
-                  )}
+                  <div className="mt-0.5">
+                    <Avatar size="sm" status={avatarStatus} statusPulse={status === "thinking"}>
+                      {avatarSrc ? (
+                        <AvatarImage src={avatarSrc} alt={name || "Agent"} />
+                      ) : (
+                        <AvatarFallback className="bg-accent/20 text-accent">
+                          <Bot className="w-4 h-4" />
+                        </AvatarFallback>
+                      )}
+                    </Avatar>
+                  </div>
                   <div className="flex flex-col">
-                    <div className="flex items-baseline gap-2 mb-0.5">
+                    <div className="flex items-center gap-2 mb-0.5">
                       <span className="font-bold text-[15px] text-foreground">
                         {name}
                       </span>

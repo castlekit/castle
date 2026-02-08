@@ -9,6 +9,7 @@ import type {
   ChatSendResponse,
   ChatCompleteRequest,
 } from "@/lib/types/chat";
+import { setAgentThinking, setAgentActive } from "@/lib/hooks/use-agent-status";
 
 // ============================================================================
 // Fetcher
@@ -216,6 +217,9 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
           const remaining = Math.max(0, MIN_INDICATOR_MS - elapsed);
 
           const persistAndCleanup = () => {
+            // Mark agent as active (2 min timer back to idle)
+            setAgentActive(streamAgentId);
+
             // Persist to DB, then reload history, then remove streaming placeholder
             if (finalContent) {
               const completePayload: ChatCompleteRequest = {
@@ -281,6 +285,9 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
           const errorContent = sm?.content || "";
           const errorAgentId = sm?.agentId || defaultAgentId || "";
           const errorAgentName = sm?.agentName;
+
+          // Mark agent as active even on error (it did work)
+          setAgentActive(errorAgentId);
 
           // Remove streaming message immediately for errors
           activeRunIds.current.delete(delta.runId);
@@ -420,11 +427,14 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
         await new Promise((resolve) => setTimeout(resolve, delay));
 
         // Add streaming placeholder — shows typing indicator
+        const resolvedAgentId = agentId || defaultAgentId || "";
+        setAgentThinking(resolvedAgentId);
+
         updateStreaming((prev) => {
           const next = new Map(prev);
           next.set(result.runId, {
             runId: result.runId,
-            agentId: agentId || defaultAgentId || "",
+            agentId: resolvedAgentId,
             agentName: "",
             sessionKey: result.sessionKey,
             content: "",

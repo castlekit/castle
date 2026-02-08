@@ -4,17 +4,18 @@ import { cn } from "@/lib/utils";
 export interface AvatarProps extends HTMLAttributes<HTMLDivElement> {
   size?: "sm" | "md" | "lg";
   status?: "online" | "offline" | "busy" | "away";
+  statusPulse?: boolean;
 }
 
 const Avatar = forwardRef<HTMLDivElement, AvatarProps>(
-  ({ className, size = "md", status, children, ...props }, ref) => {
+  ({ className, size = "md", status, statusPulse, children, ...props }, ref) => {
     return (
-      <div className="relative inline-block">
+      <div className="relative inline-block shrink-0">
         <div
           className={cn(
-            "relative flex shrink-0 overflow-hidden rounded-[var(--radius-full)] bg-surface border border-border",
+            "relative flex shrink-0 overflow-hidden rounded-[4px] bg-surface border border-border",
             {
-              "h-8 w-8": size === "sm",
+              "h-9 w-9": size === "sm",
               "h-10 w-10": size === "md",
               "h-12 w-12": size === "lg",
             },
@@ -28,18 +29,19 @@ const Avatar = forwardRef<HTMLDivElement, AvatarProps>(
         {status && (
           <span
             className={cn(
-              "absolute bottom-0 right-0 block rounded-[var(--radius-full)] ring-2 ring-background",
+              "absolute block rounded-full ring-2 ring-background",
               {
-                "h-2.5 w-2.5": size === "sm",
-                "h-3 w-3": size === "md",
-                "h-3.5 w-3.5": size === "lg",
+                "h-2.5 w-2.5 -bottom-0.5 -right-0.5": size === "sm",
+                "h-3 w-3 -bottom-0.5 -right-0.5": size === "md",
+                "h-3.5 w-3.5 -bottom-0.5 -right-0.5": size === "lg",
               },
               {
                 "bg-success": status === "online",
                 "bg-foreground-muted": status === "offline",
                 "bg-error": status === "busy",
                 "bg-warning": status === "away",
-              }
+              },
+              statusPulse && "animate-pulse"
             )}
           />
         )}
