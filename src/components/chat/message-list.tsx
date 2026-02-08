@@ -32,41 +32,80 @@ export function MessageList({
 }: MessageListProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const isInitialLoad = useRef(true);
+  const pinnedToBottom = useRef(true);
 
-  // Initial scroll: useLayoutEffect runs BEFORE paint so user never sees the jump
+  // Scroll helper
+  const scrollToBottom = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (container) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }, []);
+
+  // Track if user has scrolled away from bottom
+  const checkIfPinned = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+    const threshold = 50;
+    pinnedToBottom.current =
+      container.scrollHeight - container.scrollTop - container.clientHeight < threshold;
+  }, []);
+
+  // ResizeObserver: auto-scroll when content OR container size changes while pinned.
+  // The container can resize when the input box below shrinks (e.g. text cleared on send).
+  // When that happens the browser caps scrollTop and content appears to shift down.
+  useEffect(() => {
+    const content = contentRef.current;
+    const container = scrollContainerRef.current;
+    if (!content || !container) return;
+
+    const observer = new ResizeObserver(() => {
+      if (pinnedToBottom.current) {
+        scrollToBottom();
+      }
+    });
+    observer.observe(content);
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [scrollToBottom]);
+
+  // Initial scroll before paint
   useLayoutEffect(() => {
     if (isInitialLoad.current && messages.length > 0) {
-      const container = scrollContainerRef.current;
-      if (container) {
-        container.scrollTop = container.scrollHeight;
-      }
+      pinnedToBottom.current = true;
+      scrollToBottom();
+      requestAnimationFrame(scrollToBottom);
       isInitialLoad.current = false;
     }
-  }, [messages.length]);
+  }, [messages.length, scrollToBottom]);
 
-  // Subsequent messages: smooth scroll after paint
-  useEffect(() => {
-    if (!isInitialLoad.current && messages.length > 0) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  // Re-pin to bottom when new messages arrive or streaming changes
+  useLayoutEffect(() => {
+    if (!isInitialLoad.current) {
+      pinnedToBottom.current = true;
     }
-  }, [messages.length]);
+  }, [messages, streamingMessages]);
 
-  // Also scroll when streaming content updates
-  useEffect(() => {
-    if (streamingMessages && streamingMessages.size > 0) {
-      bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  // EVERY render: if pinned, scroll to bottom BEFORE paint.
+  // This catches container resizes (e.g. input box shrinks when cleared)
+  // that would otherwise cause a one-frame content shift.
+  useLayoutEffect(() => {
+    if (pinnedToBottom.current) {
+      scrollToBottom();
     }
-  }, [streamingMessages]);
+  });
 
-  // Infinite scroll up for loading older messages
+  // Infinite scroll up for loading older messages + track pinned state
   const handleScroll = useCallback(() => {
+    checkIfPinned();
     if (!scrollContainerRef.current || !hasMore || loadingMore || !onLoadMore) return;
     const { scrollTop } = scrollContainerRef.current;
     if (scrollTop < 100) {
       onLoadMore();
     }
-  }, [hasMore, loadingMore, onLoadMore]);
+  }, [hasMore, loadingMore, onLoadMore, checkIfPinned]);
 
   const getAgentName = (agentId: string) => {
     const agent = agents.find((a) => a.id === agentId);
@@ -165,10 +204,10 @@ export function MessageList({
   return (
     <div
       ref={scrollContainerRef}
-      className="flex-1 overflow-y-auto flex flex-col justify-end"
+      className="flex-1 overflow-y-auto"
       onScroll={handleScroll}
     >
-      <div className="py-[20px] pr-[20px]">
+      <div ref={contentRef} className="py-[20px] pr-[20px]">
         {/* Loading more indicator */}
         {loadingMore && (
           <div className="flex justify-center py-2">

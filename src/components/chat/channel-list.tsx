@@ -73,22 +73,18 @@ export function ChannelList({
       {!loading && channels.length > 0 && (
         <div className="selectable-list">
           {channels.map((channel) => (
-            <div
+            <Link
               key={channel.id}
+              href={`/chat/${channel.id}`}
               className={cn(
-                "selectable-list-item transition-colors group relative",
+                "selectable-list-item transition-colors group relative flex items-center gap-2.5",
                 activeChannelId === channel.id
                   ? "bg-accent/10 text-accent"
                   : "text-foreground"
               )}
             >
-              <Link
-                href={`/chat/${channel.id}`}
-                className="flex items-center gap-2.5 flex-1 min-w-0"
-              >
-                <MessageCircle className="h-4 w-4 shrink-0" />
-                <span className="truncate">{channel.name}</span>
-              </Link>
+              <MessageCircle className="h-4 w-4 shrink-0" />
+              <span className="truncate flex-1 min-w-0">{channel.name}</span>
               <button
                 onClick={async (e) => {
                   e.preventDefault();
@@ -119,7 +115,7 @@ export function ChannelList({
               >
                 <Archive className="h-3.5 w-3.5" />
               </button>
-            </div>
+            </Link>
           ))}
         </div>
       )}
