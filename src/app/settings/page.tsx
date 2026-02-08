@@ -8,9 +8,10 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useUserSettings } from "@/lib/hooks/use-user-settings";
+import { cn } from "@/lib/utils";
 
 export default function SettingsPage() {
-  const { displayName: savedName, avatarUrl: sharedAvatarUrl, isLoading: settingsLoading, refresh } = useUserSettings();
+  const { displayName: savedName, avatarUrl: sharedAvatarUrl, tooltips: savedTooltips, isLoading: settingsLoading, refresh } = useUserSettings();
   const [displayName, setDisplayName] = useState("");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [initialized, setInitialized] = useState(false);
@@ -19,6 +20,7 @@ export default function SettingsPage() {
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const [avatarSaved, setAvatarSaved] = useState(false);
   const [avatarError, setAvatarError] = useState("");
+  const [tooltipsEnabled, setTooltipsEnabled] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Sync from SWR on initial load
@@ -26,9 +28,10 @@ export default function SettingsPage() {
     if (!settingsLoading && !initialized) {
       setDisplayName(savedName);
       setAvatarUrl(sharedAvatarUrl);
+      setTooltipsEnabled(savedTooltips);
       setInitialized(true);
     }
-  }, [settingsLoading, savedName, sharedAvatarUrl, initialized]);
+  }, [settingsLoading, savedName, sharedAvatarUrl, savedTooltips, initialized]);
 
   const loading = settingsLoading && !initialized;
 
@@ -240,6 +243,50 @@ export default function SettingsPage() {
                     Shown in chat channel headers and message attribution.
                   </p>
                 </div>
+              </div>
+            </div>
+
+            {/* Interface section */}
+            <div className="panel p-6">
+              <h2 className="text-sm font-semibold text-foreground mb-4">
+                Interface
+              </h2>
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium text-foreground">
+                    Menu tooltips
+                  </p>
+                  <p className="text-xs text-foreground-secondary mt-0.5">
+                    Show tooltips when hovering sidebar menu icons
+                  </p>
+                </div>
+                <button
+                  onClick={async () => {
+                    const newValue = !tooltipsEnabled;
+                    setTooltipsEnabled(newValue);
+                    try {
+                      await fetch("/api/settings", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ tooltips: String(newValue) }),
+                      });
+                      refresh();
+                    } catch {
+                      setTooltipsEnabled(!newValue); // revert on error
+                    }
+                  }}
+                  className={cn(
+                    "relative inline-flex h-6 w-11 items-center rounded-full transition-colors cursor-pointer",
+                    tooltipsEnabled ? "bg-accent" : "bg-foreground-muted/30"
+                  )}
+                >
+                  <span
+                    className={cn(
+                      "inline-block h-4 w-4 rounded-full bg-white transition-transform",
+                      tooltipsEnabled ? "translate-x-6" : "translate-x-1"
+                    )}
+                  />
+                </button>
               </div>
             </div>
           </div>

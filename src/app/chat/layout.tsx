@@ -69,7 +69,7 @@ export default function ChatLayout({
         </div>
 
         {/* Main content — fills remaining space, aligned with floating boxes */}
-        <div className="flex-1 min-w-0 h-full overflow-hidden pr-[20px]">
+        <div className="flex-1 min-w-0 h-full overflow-hidden pr-[20px] flex flex-col">
           {children}
         </div>
       </div>

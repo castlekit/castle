@@ -73,7 +73,7 @@ export function MessageList({
   if (loading) {
     return (
       <div className="flex-1 flex items-center justify-center">
-        <Loader2 className="h-6 w-6 animate-spin text-foreground-secondary" />
+        <Loader2 className="h-5 w-5 animate-spin text-foreground-secondary" />
       </div>
     );
   }

@@ -99,7 +99,7 @@ export function ArchivedChannels({
             <p className="text-sm">No archived channels</p>
           </div>
         ) : (
-          <div className="space-y-1">
+          <div className="space-y-3">
             {channels.map((channel) => (
               <div
                 key={channel.id}

@@ -5,6 +5,7 @@ import { getAllSettings, setSetting } from "@/lib/db/queries";
 const VALID_KEYS: Record<string, { maxLength: number }> = {
   displayName: { maxLength: 100 },
   avatarPath: { maxLength: 255 },
+  tooltips: { maxLength: 5 }, // "true" or "false"
 };
 
 // ============================================================================

@@ -2,6 +2,7 @@
 
 import { use, useState, useEffect } from "react";
 import { WifiOff, X, AlertCircle, Search } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { useOpenClaw } from "@/lib/hooks/use-openclaw";
 import { useChat } from "@/lib/hooks/use-chat";
 import { useSessionStats } from "@/lib/hooks/use-session-stats";
@@ -20,7 +21,7 @@ interface ChannelPageProps {
 function ChannelChatContent({ channelId }: { channelId: string }) {
   const { agents, isConnected, isLoading: gatewayLoading } = useOpenClaw();
   const [showSearch, setShowSearch] = useState(false);
-  const [channelName, setChannelName] = useState<string>("");
+  const [channelName, setChannelName] = useState<string | null>(null);
   const [channelAgentIds, setChannelAgentIds] = useState<string[]>([]);
   const { displayName, avatarUrl: userAvatar } = useUserSettings();
 
@@ -83,13 +84,16 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
     sessionKey: currentSessionKey,
   });
 
+  // Don't render until channel info has loaded to prevent FOUC
+  const channelReady = channelName !== null;
+
   return (
-    <div className="flex-1 flex flex-col h-full overflow-hidden">
+    <div className={cn("flex-1 flex flex-col h-full overflow-hidden transition-opacity duration-150", channelReady ? "opacity-100" : "opacity-0")}>
       {/* Channel header — sticky */}
       <div className="py-4 border-b border-border flex items-center justify-between shrink-0">
         <div>
           <h2 className="text-lg font-semibold text-foreground">
-            {channelName || "Channel"}
+            {channelName || ""}
           </h2>
           {(displayName || channelAgentIds.length > 0) && agents.length > 0 && (
             <p className="text-sm text-foreground-secondary mt-0.5">

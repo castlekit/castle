@@ -9,6 +9,7 @@ const fetcher = (url: string) => fetch(url).then((r) => r.json());
 interface UserSettings {
   displayName?: string;
   avatarPath?: string;
+  tooltips?: string;
 }
 
 /**
@@ -32,10 +33,12 @@ export function useUserSettings() {
   const avatarUrl = data?.avatarPath
     ? `/api/settings/avatar?v=${encodeURIComponent(data.avatarPath)}`
     : null;
+  const tooltips = data?.tooltips !== "false"; // default true
 
   return {
     displayName,
     avatarUrl,
+    tooltips,
     isLoading,
     /** Call after saving settings to refresh all consumers */
     refresh: () => mutate(),

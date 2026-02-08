@@ -55,6 +55,7 @@ function Sidebar({
 }: SidebarProps) {
   const pathname = usePathname();
   const useLinks = !onNavigate;
+  const { tooltips: showTooltips } = useUserSettings();
 
   const activeFromPath = (() => {
     if (!pathname) return "dashboard";
@@ -125,11 +126,14 @@ function Sidebar({
             </button>
           );
 
-          return (
-            <Tooltip key={item.id} content={item.label} side="right">
-              {NavEl}
-            </Tooltip>
-          );
+          if (showTooltips) {
+            return (
+              <Tooltip key={item.id} content={item.label} side="right">
+                {NavEl}
+              </Tooltip>
+            );
+          }
+          return <div key={item.id}>{NavEl}</div>;
         })}
       </nav>
 

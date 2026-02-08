@@ -42,7 +42,7 @@ export function ChannelList({
 
   useEffect(() => {
     fetchChannels();
-  }, [activeChannelId]);
+  }, []); // Only fetch once on mount — channel list doesn't change on navigation
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>
