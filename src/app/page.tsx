@@ -64,7 +64,7 @@ function AgentCard({
           return;
         }
 
-        // Refresh agents to pick up new avatar
+        // Gateway hot-reloads — just refresh agents to pick up new avatar
         onAvatarUpdated();
       } catch {
         alert("Failed to upload avatar");
