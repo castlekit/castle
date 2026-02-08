@@ -210,70 +210,68 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
           const streamSessionKey =
             delta.sessionKey || sm?.sessionKey || "";
 
-          // Update streaming message to show final content while persisting
-          if (finalContent) {
-            updateStreaming((prev) => {
-              const next = new Map(prev);
-              next.set(delta.runId, {
+          // Ensure typing indicator shows for at least 800ms
+          const MIN_INDICATOR_MS = 800;
+          const elapsed = sm?.startedAt ? Date.now() - sm.startedAt : MIN_INDICATOR_MS;
+          const remaining = Math.max(0, MIN_INDICATOR_MS - elapsed);
+
+          const persistAndCleanup = () => {
+            // Persist to DB, then reload history, then remove streaming placeholder
+            if (finalContent) {
+              const completePayload: ChatCompleteRequest = {
                 runId: delta.runId,
-                agentId: streamAgentId,
-                agentName: streamAgentName || "",
-                sessionKey: streamSessionKey,
+                channelId,
                 content: finalContent,
-                startedAt: sm?.startedAt || Date.now(),
-              });
-              return next;
-            });
-          }
+                sessionKey: streamSessionKey,
+                agentId: streamAgentId,
+                agentName: streamAgentName,
+                status: "complete",
+                inputTokens: delta.message?.inputTokens,
+                outputTokens: delta.message?.outputTokens,
+              };
 
-          // Persist to DB, then reload history, then remove streaming placeholder
-          if (finalContent) {
-            const completePayload: ChatCompleteRequest = {
-              runId: delta.runId,
-              channelId,
-              content: finalContent,
-              sessionKey: streamSessionKey,
-              agentId: streamAgentId,
-              agentName: streamAgentName,
-              status: "complete",
-              inputTokens: delta.message?.inputTokens,
-              outputTokens: delta.message?.outputTokens,
-            };
-
-            fetch("/api/openclaw/chat", {
-              method: "PUT",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(completePayload),
-            })
-              .then((res) => {
-                if (!res.ok) {
-                  console.error("[useChat] PUT failed:", res.status);
-                }
-                return mutateHistory();
+              fetch("/api/openclaw/chat", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(completePayload),
               })
-              .then(() => {
-                // Only remove streaming message AFTER history has reloaded
-                updateStreaming((prev) => {
-                  const next = new Map(prev);
-                  next.delete(delta.runId);
-                  return next;
+                .then((res) => {
+                  if (!res.ok) {
+                    console.error("[useChat] PUT failed:", res.status);
+                  }
+                  return mutateHistory();
+                })
+                .then(() => {
+                  // Only remove streaming message AFTER history has reloaded
+                  updateStreaming((prev) => {
+                    const next = new Map(prev);
+                    next.delete(delta.runId);
+                    return next;
+                  });
+                })
+                .catch((err) => {
+                  console.error("[useChat] Complete persist failed:", err);
+                  updateStreaming((prev) => {
+                    const next = new Map(prev);
+                    next.delete(delta.runId);
+                    return next;
+                  });
                 });
-              })
-              .catch((err) => {
-                console.error("[useChat] Complete persist failed:", err);
-                updateStreaming((prev) => {
-                  const next = new Map(prev);
-                  next.delete(delta.runId);
-                  return next;
-                });
+            } else {
+              // No content at all — just clean up
+              updateStreaming((prev) => {
+                const next = new Map(prev);
+                next.delete(delta.runId);
+                return next;
               });
+            }
+          };
+
+          // Wait for minimum indicator time, then persist
+          if (remaining > 0) {
+            setTimeout(persistAndCleanup, remaining);
           } else {
-            // No content at all — just clean up
-            updateStreaming((prev) => {
-              const next = new Map(prev);
-              next.delete(delta.runId);
-              return next;
-            });
+            persistAndCleanup();
           }
         } else if (delta.state === "error") {
           console.error("[useChat] Stream error:", delta.errorMessage);
@@ -414,7 +412,14 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
         // Track this run for streaming
         activeRunIds.current.add(result.runId);
 
-        // Add a streaming message placeholder
+        // Refresh history to show the persisted user message
+        mutateHistory();
+
+        // Random delay before showing typing indicator — feels natural
+        const delay = 800 + Math.random() * 400;
+        await new Promise((resolve) => setTimeout(resolve, delay));
+
+        // Add streaming placeholder — shows typing indicator
         updateStreaming((prev) => {
           const next = new Map(prev);
           next.set(result.runId, {
@@ -427,9 +432,6 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
           });
           return next;
         });
-
-        // Refresh history to show the persisted user message
-        mutateHistory();
       } catch (err) {
         setSendError((err as Error).message);
       } finally {

@@ -37,10 +37,21 @@ export function MessageList({
   // Auto-scroll to bottom when messages load or new messages arrive
   useEffect(() => {
     if (messages.length > 0) {
-      bottomRef.current?.scrollIntoView({
-        behavior: isInitialLoad.current ? "instant" : "smooth",
-      });
-      isInitialLoad.current = false;
+      const scrollToBottom = () => {
+        bottomRef.current?.scrollIntoView({
+          behavior: isInitialLoad.current ? "instant" : "smooth",
+        });
+        isInitialLoad.current = false;
+      };
+
+      if (isInitialLoad.current) {
+        // On initial load, wait for layout to settle (Twemoji, markdown, images)
+        requestAnimationFrame(() => {
+          setTimeout(scrollToBottom, 50);
+        });
+      } else {
+        scrollToBottom();
+      }
     }
   }, [messages.length]);
 
@@ -231,60 +242,22 @@ export function MessageList({
           );
         })}
 
-        {/* Streaming messages (only show if they have content AND aren't already persisted) */}
+        {/* Typing indicator — shows dots until the final message is persisted */}
         {streamingMessages &&
           Array.from(streamingMessages.values())
-            .filter((sm) => {
-              // Don't render if content is empty (typing indicator handles that)
-              if (sm.content.length === 0) return false;
-              // Don't render if already persisted in the messages list (prevents duplicate flash)
-              if (messages.some((m) => m.runId === sm.runId)) return false;
-              return true;
-            })
-            .map((sm) => (
-              <MessageBubble
-                key={`streaming-${sm.runId}`}
-                message={{
-                  id: `streaming-${sm.runId}`,
-                  channelId: "",
-                  sessionId: null,
-                  senderType: "agent",
-                  senderId: sm.agentId,
-                  senderName: sm.agentName,
-                  content: sm.content,
-                  status: "complete",
-                  mentionedAgentId: null,
-                  runId: sm.runId,
-                  sessionKey: sm.sessionKey,
-                  inputTokens: null,
-                  outputTokens: null,
-                  createdAt: sm.startedAt,
-                  attachments: [],
-                  reactions: [],
-                }}
-                isAgent
-                agentName={sm.agentName || getAgentName(sm.agentId)}
-                agentAvatar={getAgentAvatar(sm.agentId)}
-                agents={agents}
-                isStreaming
-              />
-            ))}
-
-        {/* Typing indicator when there are streaming messages with no content yet */}
-        {streamingMessages &&
-          Array.from(streamingMessages.values())
-            .filter((sm) => sm.content.length === 0)
+            .filter((sm) => !messages.some((m) => m.runId === sm.runId && m.senderType === "agent"))
             .map((sm) => {
               const avatar = getAgentAvatar(sm.agentId);
+              const name = sm.agentName || getAgentName(sm.agentId);
               return (
                 <div
-                  key={`typing-${sm.runId}`}
+                  key={`streaming-${sm.runId}`}
                   className="flex gap-3 mt-4"
                 >
                   {avatar ? (
                     <img
                       src={avatar}
-                      alt={sm.agentName || getAgentName(sm.agentId) || "Agent"}
+                      alt={name || "Agent"}
                       className="w-9 h-9 rounded-[4px] shrink-0 object-cover mt-0.5"
                     />
                   ) : (
@@ -295,7 +268,7 @@ export function MessageList({
                   <div className="flex flex-col">
                     <div className="flex items-baseline gap-2 mb-0.5">
                       <span className="font-bold text-[15px] text-foreground">
-                        {sm.agentName || getAgentName(sm.agentId)}
+                        {name}
                       </span>
                     </div>
                     <div className="flex items-center gap-1 py-1">
