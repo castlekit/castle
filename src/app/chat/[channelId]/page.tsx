@@ -174,7 +174,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
       )}
 
       {/* Input — sticky at bottom */}
-      <div className="border-t border-border pt-5 shrink-0">
+      <div className="shrink-0">
         <ChatInput
           onSend={sendMessage}
           onAbort={abortResponse}

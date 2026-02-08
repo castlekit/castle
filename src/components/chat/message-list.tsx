@@ -160,7 +160,7 @@ export function MessageList({
       className="flex-1 overflow-y-auto flex flex-col"
       onScroll={handleScroll}
     >
-      <div className="mt-auto py-4">
+      <div className="mt-auto py-[20px] pr-[20px]">
         {/* Loading more indicator */}
         {loadingMore && (
           <div className="flex justify-center py-2">
@@ -285,16 +285,16 @@ export function MessageList({
                     <img
                       src={avatar}
                       alt={sm.agentName || getAgentName(sm.agentId) || "Agent"}
-                      className="w-9 h-9 rounded-lg shrink-0 object-cover mt-0.5"
+                      className="w-9 h-9 rounded-[4px] shrink-0 object-cover mt-0.5"
                     />
                   ) : (
-                    <div className="flex items-center justify-center w-9 h-9 rounded-lg shrink-0 bg-accent/20 text-accent mt-0.5">
+                    <div className="flex items-center justify-center w-9 h-9 rounded-[4px] shrink-0 bg-accent/20 text-accent mt-0.5">
                       <Bot className="w-4 h-4" />
                     </div>
                   )}
                   <div className="flex flex-col">
                     <div className="flex items-baseline gap-2 mb-0.5">
-                      <span className="font-semibold text-sm text-foreground">
+                      <span className="font-bold text-[15px] text-foreground">
                         {sm.agentName || getAgentName(sm.agentId)}
                       </span>
                     </div>

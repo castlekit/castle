@@ -4,6 +4,7 @@ import React from "react";
 import { Bot, User, AlertTriangle, StopCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MarkdownContent } from "./markdown-content";
+import { TwemojiText } from "@/components/ui/twemoji-text";
 import type { ChatMessage } from "@/lib/types/chat";
 import type { AgentInfo } from "./agent-mention-popup";
 
@@ -54,12 +55,12 @@ export function MessageBubble({
             <img
               src={avatar}
               alt={displayName}
-              className="w-9 h-9 rounded-lg shrink-0 object-cover mt-0.5"
+              className="w-9 h-9 rounded-[4px] shrink-0 object-cover mt-0.5"
             />
           ) : (
             <div
               className={cn(
-                "flex items-center justify-center w-9 h-9 rounded-lg shrink-0 mt-0.5",
+                "flex items-center justify-center w-9 h-9 rounded-[4px] shrink-0 mt-0.5",
                 isAgent ? "bg-accent/20 text-accent" : "bg-foreground/10 text-foreground"
               )}
             >
@@ -74,7 +75,7 @@ export function MessageBubble({
         {/* Name + time header — only on first message in a group */}
         {showHeader && (
           <div className="flex items-baseline gap-2 mb-0.5">
-            <span className="font-semibold text-sm text-foreground">
+            <span className="font-bold text-[15px] text-foreground">
               {displayName}
             </span>
             <span className="text-xs text-foreground-secondary">
@@ -98,12 +99,14 @@ export function MessageBubble({
         )}
 
         {/* Message text — no bubble, just plain text */}
-        <div className="text-sm text-foreground leading-relaxed">
-          {isAgent && message.content ? (
-            <MarkdownContent content={message.content} />
-          ) : (
-            <span className="whitespace-pre-wrap">{message.content}</span>
-          )}
+        <div className="text-[15px] text-foreground leading-[26px]">
+          <TwemojiText>
+            {isAgent && message.content ? (
+              <MarkdownContent content={message.content} />
+            ) : (
+              <span className="whitespace-pre-wrap">{message.content}</span>
+            )}
+          </TwemojiText>
 
           {/* Streaming cursor */}
           {isStreaming && (

@@ -2,6 +2,7 @@
 
 import React, { useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Copy, Check } from "lucide-react";
@@ -51,8 +52,9 @@ function CopyButton({ text }: { text: string }) {
  */
 export function MarkdownContent({ content, className }: MarkdownContentProps) {
   return (
-    <div className={cn("prose prose-sm dark:prose-invert max-w-none", className)}>
+    <div className={cn("prose prose-sm dark:prose-invert max-w-none [&>p]:my-0", className)}>
       <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
         components={{
           // Code blocks with syntax highlighting
           code({ className: codeClassName, children, ...props }) {
@@ -181,7 +183,7 @@ export function MarkdownContent({ content, className }: MarkdownContentProps) {
 
           // Paragraphs
           p({ children }) {
-            return <p className="my-1.5 leading-relaxed">{children}</p>;
+            return <p>{children}</p>;
           },
 
           // Headings
