@@ -30,17 +30,30 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           pip install detect-secrets==1.5.0
-          # PYTHONPATH loads the Castle/OpenClaw custom detector plugin
           export PYTHONPATH=.detect-secrets-plugins
-          # Scan and update baseline — fails if new unaudited secrets are found
-          detect-secrets scan --update .secrets.baseline \
-            --exclude-files '(^|/)(package-lock\.json$|dist/|\.next/|node_modules/|\.detect-secrets\.cfg$|\.secrets\.baseline$)'
-          # Check if baseline has changed (new secrets detected)
-          if ! git diff --quiet .secrets.baseline; then
-            echo "::error::New potential secrets detected. Run 'detect-secrets audit .secrets.baseline' locally, then commit the updated baseline."
-            git diff .secrets.baseline
-            exit 1
-          fi
+
+          # Fresh scan → compare against committed baseline
+          detect-secrets scan \
+            --exclude-files '(^|/)(package-lock\.json$|dist/|\.next/|node_modules/|\.detect-secrets\.cfg$|\.secrets\.baseline$)' \
+            > /tmp/new-baseline.json
+
+          python3 - <<'PYEOF'
+          import json, sys
+          old = json.load(open(".secrets.baseline"))
+          new = json.load(open("/tmp/new-baseline.json"))
+          old_set = {(f, s["line_number"], s["hashed_secret"])
+                     for f, secrets in old.get("results", {}).items() for s in secrets}
+          new_set = {(f, s["line_number"], s["hashed_secret"])
+                     for f, secrets in new.get("results", {}).items() for s in secrets}
+          added = new_set - old_set
+          if added:
+              print(f"::error::{len(added)} new potential secret(s) detected:")
+              for f, line, _ in sorted(added):
+                  print(f"  {f}:{line}")
+              print("\nRun locally: detect-secrets scan > .secrets.baseline && detect-secrets audit .secrets.baseline")
+              sys.exit(1)
+          print("No new secrets detected.")
+          PYEOF
 
       - name: Check for sensitive files
         if: github.event_name == 'pull_request'
