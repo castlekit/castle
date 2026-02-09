@@ -7,7 +7,10 @@ import type { SessionStatus } from "@/lib/types/chat";
 const fetcher = async (url: string): Promise<SessionStatus | null> => {
   const res = await fetch(url);
   if (res.status === 204) return null;
-  if (!res.ok) throw new Error("Failed to fetch session stats");
+  if (!res.ok) {
+    console.error(`[useSessionStats] Fetch failed: ${res.status} ${url}`);
+    throw new Error("Failed to fetch session stats");
+  }
   return res.json();
 };
 

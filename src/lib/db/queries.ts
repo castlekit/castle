@@ -339,18 +339,28 @@ export function updateMessage(
   }
 ): boolean {
   const db = getDb();
-  const result = db
-    .update(messages)
-    .set(updates)
-    .where(eq(messages.id, id))
-    .run();
-  return result.changes > 0;
+  try {
+    const result = db
+      .update(messages)
+      .set(updates)
+      .where(eq(messages.id, id))
+      .run();
+    return result.changes > 0;
+  } catch (err) {
+    console.error(`[DB] updateMessage FAILED — id=${id} keys=${Object.keys(updates).join(",")}:`, (err as Error).message);
+    throw err;
+  }
 }
 
 export function deleteMessage(id: string): boolean {
   const db = getDb();
-  const result = db.delete(messages).where(eq(messages.id, id)).run();
-  return result.changes > 0;
+  try {
+    const result = db.delete(messages).where(eq(messages.id, id)).run();
+    return result.changes > 0;
+  } catch (err) {
+    console.error(`[DB] deleteMessage FAILED — id=${id}:`, (err as Error).message);
+    throw err;
+  }
 }
 
 /**
@@ -591,14 +601,19 @@ export function createSession(params: {
   const id = uuid();
   const now = Date.now();
 
-  db.insert(sessions)
-    .values({
-      id,
-      channelId: params.channelId,
-      sessionKey: params.sessionKey ?? null,
-      startedAt: now,
-    })
-    .run();
+  try {
+    db.insert(sessions)
+      .values({
+        id,
+        channelId: params.channelId,
+        sessionKey: params.sessionKey ?? null,
+        startedAt: now,
+      })
+      .run();
+  } catch (err) {
+    console.error(`[DB] createSession FAILED — channelId=${params.channelId} sessionKey=${params.sessionKey}:`, (err as Error).message);
+    throw err;
+  }
 
   return {
     id,
@@ -845,27 +860,32 @@ export function searchMessages(
 
   let rows: Record<string, unknown>[];
 
-  if (channelId) {
-    const stmt = sqlite.prepare(`
-      SELECT m.*
-      FROM messages m
-      JOIN messages_fts fts ON m.rowid = fts.rowid
-      WHERE messages_fts MATCH ?
-        AND m.channel_id = ?
-      ORDER BY m.created_at DESC
-      LIMIT ?
-    `);
-    rows = stmt.all(sanitizedQuery, channelId, limit);
-  } else {
-    const stmt = sqlite.prepare(`
-      SELECT m.*
-      FROM messages m
-      JOIN messages_fts fts ON m.rowid = fts.rowid
-      WHERE messages_fts MATCH ?
-      ORDER BY m.created_at DESC
-      LIMIT ?
-    `);
-    rows = stmt.all(sanitizedQuery, limit);
+  try {
+    if (channelId) {
+      const stmt = sqlite.prepare(`
+        SELECT m.*
+        FROM messages m
+        JOIN messages_fts fts ON m.rowid = fts.rowid
+        WHERE messages_fts MATCH ?
+          AND m.channel_id = ?
+        ORDER BY m.created_at DESC
+        LIMIT ?
+      `);
+      rows = stmt.all(sanitizedQuery, channelId, limit);
+    } else {
+      const stmt = sqlite.prepare(`
+        SELECT m.*
+        FROM messages m
+        JOIN messages_fts fts ON m.rowid = fts.rowid
+        WHERE messages_fts MATCH ?
+        ORDER BY m.created_at DESC
+        LIMIT ?
+      `);
+      rows = stmt.all(sanitizedQuery, limit);
+    }
+  } catch (err) {
+    console.error(`[DB] searchMessages FTS FAILED — query="${sanitizedQuery}" channelId=${channelId}:`, (err as Error).message);
+    return [];
   }
 
   return rows.map((row) => ({

@@ -125,8 +125,10 @@ export async function PATCH(request: NextRequest) {
     }
 
     await gw.request("config.patch", patch);
+    console.log("[Config API] PATCH OK");
     return NextResponse.json({ ok: true });
   } catch (err) {
+    console.error("[Config API] PATCH FAILED:", err instanceof Error ? err.message : "Unknown error");
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Config patch failed" },
       { status: 500 }

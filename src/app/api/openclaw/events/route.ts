@@ -41,6 +41,10 @@ export async function GET(request: Request) {
 
   const encoder = new TextEncoder();
   let closed = false;
+  const connectedAt = Date.now();
+  let eventCount = 0;
+
+  console.log(`[SSE] Client connected (gateway: ${gw.state})`);
 
   // Use the request's AbortSignal as the primary cleanup mechanism.
   // ReadableStream.cancel() is unreliable in some environments.
@@ -62,11 +66,12 @@ export async function GET(request: Request) {
       // Forward gateway events (with sensitive fields redacted)
       const onGatewayEvent = (evt: GatewayEvent) => {
         if (closed) return;
+        eventCount++;
         try {
           const safe = redactEventPayload(evt);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(safe)}\n\n`));
-        } catch {
-          // Stream may have closed — trigger cleanup
+        } catch (err) {
+          console.warn(`[SSE] Stream write failed for event ${evt.event}:`, (err as Error).message);
           cleanup();
         }
       };
@@ -106,6 +111,8 @@ export async function GET(request: Request) {
       const cleanup = () => {
         if (closed) return; // prevent double cleanup
         closed = true;
+        const duration = Math.round((Date.now() - connectedAt) / 1000);
+        console.log(`[SSE] Client disconnected (${duration}s, ${eventCount} events forwarded)`);
         clearInterval(heartbeat);
         gw.off("gatewayEvent", onGatewayEvent);
         gw.off("stateChange", onStateChange);

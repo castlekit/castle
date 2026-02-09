@@ -127,6 +127,7 @@ export async function GET(request: NextRequest) {
 
     const entry = loadSessionEntry(sessionKey, agentId);
     if (!entry) {
+      console.log(`[Session Status] No session data for key=${sessionKey} agent=${agentId}`);
       return new NextResponse(null, { status: 204 });
     }
 

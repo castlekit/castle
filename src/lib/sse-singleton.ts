@@ -52,7 +52,10 @@ function dispatch(evt: SSEEvent) {
 
   // Dedup by seq — drop events we've already seen
   if (typeof evt.seq === "number") {
-    if (evt.seq <= lastSeq) return;
+    if (evt.seq <= lastSeq) {
+      console.debug("[SSE Client] Dropped duplicate event seq:", evt.seq, "event:", evt.event);
+      return;
+    }
     lastSeq = evt.seq;
   }
 
@@ -73,19 +76,25 @@ function dispatch(evt: SSEEvent) {
 function openConnection() {
   if (es) return;
 
+  console.log("[SSE Client] Opening connection (subscribers:", refCount + ")");
   es = new EventSource("/api/openclaw/events");
   lastEventTimestamp = Date.now();
+
+  es.onopen = () => {
+    console.log("[SSE Client] Connected");
+  };
 
   es.onmessage = (e) => {
     try {
       const evt: SSEEvent = JSON.parse(e.data);
       dispatch(evt);
-    } catch {
-      // Ignore parse errors
+    } catch (err) {
+      console.warn("[SSE Client] Failed to parse event:", (err as Error).message, "data:", e.data?.slice(0, 100));
     }
   };
 
-  es.onerror = () => {
+  es.onerror = (e) => {
+    console.warn("[SSE Client] Connection error (readyState:", es?.readyState + ")");
     // EventSource auto-reconnects. Notify error handlers so they can
     // update UI state (e.g. show "disconnected").
     for (const handler of errorHandlers) {
@@ -100,6 +109,7 @@ function openConnection() {
 
 function closeConnection() {
   if (es) {
+    console.log("[SSE Client] Closing connection");
     es.close();
     es = null;
   }

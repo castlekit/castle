@@ -81,6 +81,7 @@ export function useSearch() {
         }
       } catch (err) {
         if ((err as Error).name !== "AbortError") {
+          console.error("[useSearch] Search failed:", (err as Error).message);
           setResults([]);
         }
       } finally {

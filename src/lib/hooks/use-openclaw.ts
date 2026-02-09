@@ -34,12 +34,18 @@ export interface OpenClawStatus {
 
 const statusFetcher = async (url: string): Promise<OpenClawStatus> => {
   const res = await fetch(url, { method: "POST" });
+  if (!res.ok) {
+    console.warn(`[useOpenClaw] Status fetch returned ${res.status}`);
+  }
   return res.json();
 };
 
 const agentsFetcher = async (url: string): Promise<OpenClawAgent[]> => {
   const res = await fetch(url);
-  if (!res.ok) return [];
+  if (!res.ok) {
+    console.warn(`[useOpenClaw] Agents fetch failed: ${res.status}`);
+    return [];
+  }
   const data = await res.json();
   return data.agents || [];
 };
@@ -138,6 +144,7 @@ export function useOpenClaw() {
     };
 
     const handleError = () => {
+      console.warn("[useOpenClaw] SSE error — marking as disconnected");
       mutateStatus(
         (prev) => prev ? { ...prev, ok: false, state: "disconnected" } : prev,
         { revalidate: false }

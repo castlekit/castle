@@ -18,7 +18,10 @@ import { subscribe, getLastEventTimestamp, type SSEEvent } from "@/lib/sse-singl
 
 const historyFetcher = async (url: string) => {
   const res = await fetch(url);
-  if (!res.ok) throw new Error("Failed to load messages");
+  if (!res.ok) {
+    console.error(`[useChat] History fetch failed: ${res.status} ${url}`);
+    throw new Error("Failed to load messages");
+  }
   return res.json();
 };
 
@@ -86,12 +89,14 @@ function persistOrphanedRun(
       }),
     };
 
+    console.log(`[useChat] Persisting orphaned run ${runId} (channel=${run.channelId}, status=${status})`);
     fetch("/api/openclaw/chat", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })
       .then(() => {
+        console.log(`[useChat] Orphaned run ${runId} persisted successfully`);
         // Trigger SWR revalidation so the message shows when user navigates back
         globalMutate(
           (key) =>
@@ -99,7 +104,7 @@ function persistOrphanedRun(
             key.startsWith(`/api/openclaw/chat?channelId=${run.channelId}`),
         );
       })
-      .catch((err) => console.error("[useChat] Orphan persist failed:", err));
+      .catch((err) => console.error(`[useChat] Orphan persist failed for run ${runId}:`, err));
   }
 
   // All runs done — tear down
@@ -527,6 +532,7 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
 
     return () => {
       if (activeRunIds.current.size > 0) {
+        console.log(`[useChat] Unmounting with ${activeRunIds.current.size} active run(s) — handing off to orphan handler`);
         // Agent is still processing — hand off to orphan handler
         const runs = new Map<string, OrphanedRun>();
         for (const runId of activeRunIds.current) {
@@ -562,6 +568,8 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
     const interval = setInterval(() => {
       const timeSinceLastEvent = Date.now() - getLastEventTimestamp();
       if (timeSinceLastEvent < HEARTBEAT_TIMEOUT_MS) return;
+
+      console.warn(`[useChat] SSE heartbeat timeout — no events for ${Math.round(timeSinceLastEvent / 1000)}s, interrupting ${streamingMessages.size} active run(s)`);
 
       // SSE connection appears dead — mark all active runs as interrupted
       updateStreaming((prev) => {
@@ -630,6 +638,8 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
           throw new Error(`Invalid response from server: ${(parseErr as Error).message}`);
         }
 
+        console.log(`[useChat] Send OK — runId=${result.runId} channel=${channelId}`);
+
         // Update session key
         if (result.sessionKey) {
           setCurrentSessionKey(result.sessionKey);
@@ -662,6 +672,7 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
           return next;
         });
       } catch (err) {
+        console.error(`[useChat] Send FAILED — channel=${channelId}:`, (err as Error).message);
         setSendError((err as Error).message);
       } finally {
         setSending(false);

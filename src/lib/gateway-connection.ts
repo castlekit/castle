@@ -463,7 +463,8 @@ class GatewayConnection extends EventEmitter {
     let msg: GatewayFrame;
     try {
       msg = JSON.parse(data.toString());
-    } catch {
+    } catch (err) {
+      console.warn("[Gateway] Failed to parse message:", (err as Error).message);
       return;
     }
 
@@ -502,16 +503,31 @@ class GatewayConnection extends EventEmitter {
 
     const id = randomUUID();
     const frame: RequestFrame = { type: "req", id, method, params };
+    const startTime = Date.now();
 
     return new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
+        const elapsed = Date.now() - startTime;
+        console.error(`[Gateway RPC] ${method} TIMEOUT after ${elapsed}ms`);
         reject(new Error(`Request timeout: ${method}`));
       }, this.requestTimeout);
 
       this.pending.set(id, {
-        resolve: resolve as (payload: unknown) => void,
-        reject,
+        resolve: (payload: unknown) => {
+          const elapsed = Date.now() - startTime;
+          if (elapsed > 2000) {
+            console.warn(`[Gateway RPC] ${method} OK (slow: ${elapsed}ms)`);
+          } else {
+            console.log(`[Gateway RPC] ${method} OK (${elapsed}ms)`);
+          }
+          resolve(payload as T);
+        },
+        reject: (error: Error) => {
+          const elapsed = Date.now() - startTime;
+          console.error(`[Gateway RPC] ${method} FAILED (${elapsed}ms): ${sanitize(error.message)}`);
+          reject(error);
+        },
         timer,
       });
 
@@ -519,6 +535,8 @@ class GatewayConnection extends EventEmitter {
         if (err) {
           clearTimeout(timer);
           this.pending.delete(id);
+          const elapsed = Date.now() - startTime;
+          console.error(`[Gateway RPC] ${method} SEND ERROR (${elapsed}ms): ${err.message}`);
           reject(new Error(`Send failed: ${err.message}`));
         }
       });
@@ -556,6 +574,9 @@ class GatewayConnection extends EventEmitter {
     }
 
     // Reject all pending requests
+    if (this.pending.size > 0) {
+      console.warn(`[Gateway] Rejecting ${this.pending.size} pending request(s) due to connection close`);
+    }
     for (const [id, pending] of this.pending) {
       clearTimeout(pending.timer);
       pending.reject(new Error("Connection closed"));

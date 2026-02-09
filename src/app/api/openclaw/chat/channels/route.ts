@@ -41,9 +41,10 @@ export async function GET(request: NextRequest) {
 
     const archived = searchParams.get("archived") === "1";
     const all = getChannels(archived);
+    console.log(`[Channels API] GET list OK — ${all.length} channels (archived=${archived})`);
     return NextResponse.json({ channels: all });
   } catch (err) {
-    console.error("[Chat Channels] List failed:", (err as Error).message);
+    console.error("[Channels API] GET list FAILED:", (err as Error).message);
     return NextResponse.json(
       { error: sanitizeForApi((err as Error).message) },
       { status: 500 }
@@ -129,9 +130,10 @@ export async function POST(request: NextRequest) {
       if (!deleted) {
         return NextResponse.json({ error: "Channel not found" }, { status: 404 });
       }
+      console.log(`[Channels API] POST delete OK — id=${body.id}`);
       return NextResponse.json({ ok: true });
     } catch (err) {
-      console.error("[Chat Channels] Delete failed:", (err as Error).message);
+      console.error(`[Channels API] POST delete FAILED — id=${body.id}:`, (err as Error).message);
       return NextResponse.json(
         { error: sanitizeForApi((err as Error).message) },
         { status: 500 }
@@ -203,9 +205,10 @@ export async function POST(request: NextRequest) {
 
   try {
     const channel = createChannel(cleanName, body.defaultAgentId, body.agents);
+    console.log(`[Channels API] POST create OK — id=${channel.id} name="${cleanName}"`);
     return NextResponse.json({ channel }, { status: 201 });
   } catch (err) {
-    console.error("[Chat Channels] Create failed:", (err as Error).message);
+    console.error(`[Channels API] POST create FAILED — name="${cleanName}":`, (err as Error).message);
     return NextResponse.json(
       { error: sanitizeForApi((err as Error).message) },
       { status: 500 }

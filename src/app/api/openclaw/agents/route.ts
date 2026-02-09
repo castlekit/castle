@@ -105,10 +105,14 @@ export async function GET() {
   }
 
   try {
+    const _start = Date.now();
     // Fetch agents and config in parallel
     const [agentsResult, configResult] = await Promise.all([
       gw.request<AgentsListPayload>("agents.list", {}),
-      gw.request<ConfigGetPayload>("config.get", {}).catch(() => null),
+      gw.request<ConfigGetPayload>("config.get", {}).catch((err) => {
+        console.warn("[Agents API] config.get failed (non-fatal):", (err as Error).message);
+        return null;
+      }),
     ]);
 
     // Build workspace lookup from config
@@ -130,11 +134,13 @@ export async function GET() {
       return { id: agent.id, name, description, avatar, emoji };
     });
 
+    console.log(`[Agents API] GET list OK — ${agents.length} agents (${Date.now() - _start}ms)`);
     return NextResponse.json({
       agents,
       defaultId: agentsResult?.defaultId,
     });
   } catch (err) {
+    console.error("[Agents API] GET list FAILED:", err instanceof Error ? err.message : "Unknown error");
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to list agents", agents: [] },
       { status: 500 }

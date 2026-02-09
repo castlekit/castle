@@ -47,6 +47,10 @@ export async function POST() {
     await gw.request("health", {});
     const latency = Date.now() - start;
 
+    if (latency > 1000) {
+      console.warn(`[Ping] Health check slow: ${latency}ms`);
+    }
+
     return NextResponse.json({
       ok: true,
       configured: true,
@@ -54,6 +58,7 @@ export async function POST() {
       server: gw.serverInfo,
     });
   } catch (err) {
+    console.error("[Ping] Health check failed:", err instanceof Error ? err.message : "Unknown error");
     return NextResponse.json({
       ok: false,
       configured: true,

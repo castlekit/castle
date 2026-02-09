@@ -52,8 +52,10 @@ export async function GET() {
     // Sort by most recently modified
     sessions.sort((a, b) => new Date(b.modifiedAt).getTime() - new Date(a.modifiedAt).getTime());
 
+    console.log(`[Sessions API] GET OK — ${sessions.length} sessions`);
     return NextResponse.json({ sessions });
   } catch (err) {
+    console.error("[Sessions API] GET FAILED:", err instanceof Error ? err.message : "Unknown error");
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Failed to read sessions" },
       { status: 500 }
