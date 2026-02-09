@@ -31,7 +31,13 @@ export function useSearchContext() {
 
 export function SearchProvider({ children }: { children: React.ReactNode }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isMac, setIsMac] = useState(true);
   const pathname = usePathname();
+
+  // Detect platform for keyboard shortcut display
+  useEffect(() => {
+    setIsMac(navigator.platform?.toUpperCase().includes("MAC") ?? true);
+  }, []);
 
   // Hide the floating search trigger on pages where it would overlap or isn't relevant
   const showSearchBar = pathname !== "/settings" && pathname !== "/ui-kit";
@@ -39,21 +45,12 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
   const openSearch = useCallback(() => setIsSearchOpen(true), []);
   const closeSearch = useCallback(() => setIsSearchOpen(false), []);
 
-  // Global shortcuts: Cmd+K / Ctrl+K and "/" to open search
+  // Global shortcut: Cmd+K / Ctrl+K to open search
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === "k") {
         e.preventDefault();
         setIsSearchOpen((prev) => !prev);
-        return;
-      }
-      // "/" opens search unless user is typing in an input/textarea/contenteditable
-      if (e.key === "/" && !e.metaKey && !e.ctrlKey && !e.altKey) {
-        const tag = (e.target as HTMLElement)?.tagName;
-        const editable = (e.target as HTMLElement)?.isContentEditable;
-        if (tag === "INPUT" || tag === "TEXTAREA" || editable) return;
-        e.preventDefault();
-        setIsSearchOpen(true);
       }
     };
 
@@ -72,7 +69,10 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
         >
           <Search className="h-4 w-4 shrink-0" strokeWidth={2.5} />
           <span className="text-sm text-foreground-secondary/50 flex-1 text-left">Search Castle...</span>
-          <kbd className="flex items-center justify-center h-[22px] min-w-[22px] px-1 rounded-[4px] bg-surface-hover border border-border text-[11px] font-medium text-foreground-secondary">/</kbd>
+          <kbd className="flex items-center justify-center h-[22px] px-1.5 gap-1 rounded-[4px] bg-surface-hover border border-border font-medium text-foreground-secondary">
+            {isMac ? <span className="text-[15px]">⌘</span> : <span className="text-[11px]">Ctrl</span>}
+            <span className="text-[11px]">K</span>
+          </kbd>
         </button>
       )}
       <SearchDialog open={isSearchOpen} onClose={closeSearch} />
