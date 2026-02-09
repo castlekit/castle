@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Search, Loader2, Clock, X, MessageCircle } from "lucide-react";
+import { Search, Clock, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useSearch } from "@/lib/hooks/use-search";
 import type {
@@ -23,7 +23,6 @@ function MessageResultRow({ result }: { result: MessageSearchResult }) {
 
   return (
     <div className="flex items-start gap-3 min-w-0">
-      <MessageCircle className="h-4 w-4 text-foreground-secondary shrink-0 mt-0.5" />
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2 text-xs text-foreground-secondary mb-0.5">
           <span className="px-1.5 py-0.5 rounded bg-accent/10 text-accent font-medium text-[11px]">
@@ -160,9 +159,6 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
             placeholder="Search across all channels..."
             className="flex-1 bg-transparent text-[15px] focus:outline-none placeholder:text-foreground-secondary/50"
           />
-          {isSearching && (
-            <Loader2 className="h-4 w-4 text-foreground-secondary animate-spin shrink-0" />
-          )}
           <kbd className="hidden sm:inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[11px] font-medium text-foreground-secondary/60 bg-surface-hover rounded border border-border/50">
             ESC
           </kbd>
@@ -207,6 +203,22 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
           {!query.trim() && recentSearches.length === 0 && (
             <div className="px-4 py-8 text-center text-sm text-foreground-secondary/60">
               Search across all channels
+            </div>
+          )}
+
+          {/* Loading skeleton */}
+          {query.trim() && isSearching && results.length === 0 && (
+            <div className="px-2">
+              {[1, 2, 3, 4, 5].map((i) => (
+                <div key={i} className="px-2 py-3 border-b border-border/20 last:border-b-0">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <div className="skeleton h-4 w-16 rounded" />
+                    <div className="skeleton h-3 w-12 rounded" />
+                    <div className="skeleton h-3 w-10 rounded" />
+                  </div>
+                  <div className="skeleton h-3.5 rounded" style={{ width: `${55 + i * 8}%` }} />
+                </div>
+              ))}
             </div>
           )}
 
