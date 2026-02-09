@@ -109,20 +109,20 @@ function AgentCard({
     <Card
       variant="bordered"
       className={cn(
-        "p-4 transition-colors",
+        "py-4 pl-5 pr-4 transition-colors min-h-[80px] flex items-center",
         isConnected
           ? "hover:border-border-hover"
           : "opacity-60"
       )}
     >
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-1">
         <div className="flex items-center gap-3">
           {/* Clickable avatar with upload overlay */}
           <button
             type="button"
             onClick={handleAvatarClick}
             disabled={!isConnected || uploading}
-            className="relative group rounded-[4px] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
+            className="relative group rounded-[4px] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent leading-[0]"
             title={isConnected ? "Click to change avatar" : undefined}
           >
             <Avatar size="md" status={getAvatarStatus(agentStatus, isConnected)} statusPulse={agentStatus === "thinking"}>
@@ -260,13 +260,16 @@ function AgentsSkeleton() {
   return (
     <div className="grid gap-3">
       {[1, 2, 3].map((i) => (
-        <Card key={i} variant="bordered" className="p-4">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full bg-surface-hover animate-pulse" />
-            <div className="space-y-2">
-              <div className="h-4 w-24 bg-surface-hover rounded animate-pulse" />
-              <div className="h-3 w-32 bg-surface-hover rounded animate-pulse" />
+        <Card key={i} variant="bordered" className="p-4 min-h-[80px] flex items-center">
+          <div className="flex items-center justify-between flex-1">
+            <div className="flex items-center gap-3">
+              <div className="skeleton h-10 w-10 rounded-full" />
+              <div className="space-y-2">
+                <div className="skeleton h-4 w-24 rounded" />
+                <div className="skeleton h-3 w-32 rounded" />
+              </div>
             </div>
+            <div className="skeleton h-5 w-14 rounded-full" />
           </div>
         </Card>
       ))}
@@ -360,7 +363,7 @@ export default function HomePage() {
               )}
             </div>
 
-            {agentsLoading && isLoading ? (
+            {agentsLoading || (isLoading && agents.length === 0) ? (
               <AgentsSkeleton />
             ) : agents.length > 0 ? (
               <div className="grid gap-3">

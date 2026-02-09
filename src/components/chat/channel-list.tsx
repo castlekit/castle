@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MessageCircle, Loader2, Archive } from "lucide-react";
+import { Hash, MessageCircle, Loader2, Archive } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { Channel } from "@/lib/types/chat";
@@ -88,13 +88,13 @@ export function ChannelList({
               onClick={() => router.push(`/chat/${channel.id}`)}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") router.push(`/chat/${channel.id}`); }}
               className={cn(
-                "selectable-list-item transition-colors group relative flex items-center gap-2.5 w-full text-left cursor-pointer",
+                "selectable-list-item transition-colors group relative flex items-center gap-1.5 w-full text-left cursor-pointer",
                 activeChannelId === channel.id
                   ? "bg-accent/10 text-accent"
                   : "text-foreground"
               )}
             >
-              <MessageCircle className="h-4 w-4 shrink-0" />
+              <Hash className="h-4 w-4 shrink-0" strokeWidth={2.5} />
               <span className="truncate flex-1 min-w-0">{channel.name}</span>
               <button
                 onClick={async (e) => {

@@ -179,7 +179,7 @@ function SidebarUserMenu() {
     <div ref={menuRef} className="relative flex justify-center pb-[8px]">
       <button
         onClick={() => setOpen(!open)}
-        className="group flex items-center justify-center rounded-[4px] cursor-pointer overflow-hidden transition-opacity"
+        className="group flex items-center justify-center rounded-[4px] cursor-pointer transition-opacity"
       >
         <Avatar size="sm" status={avatarDotStatus}>
           {settingsLoading ? (
