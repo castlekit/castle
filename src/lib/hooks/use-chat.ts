@@ -164,15 +164,36 @@ function orphanEventSource(
 // Hook
 // ============================================================================
 
+/** Max messages to keep in the SWR cache. When exceeded, evict from the
+ *  opposite end to prevent unbounded memory growth during long scroll sessions. */
+const MAX_CACHED_MESSAGES = 500;
+
 interface UseChatOptions {
   channelId: string;
   defaultAgentId?: string;
+  /** When set, loads a window of messages around this ID instead of the latest. */
+  anchorMessageId?: string;
+}
+
+/** Shape of the SWR cache for message history. */
+interface HistoryData {
+  messages: ChatMessage[];
+  hasMoreBefore: boolean;
+  hasMoreAfter: boolean;
 }
 
 interface UseChatReturn {
   // Messages
   messages: ChatMessage[];
   isLoading: boolean;
+  hasMoreBefore: boolean;
+  hasMoreAfter: boolean;
+  loadOlder: () => void;
+  loadNewer: () => void;
+  loadingOlder: boolean;
+  loadingNewer: boolean;
+
+  // Backward-compat aliases
   hasMore: boolean;
   loadMore: () => void;
   loadingMore: boolean;
@@ -189,18 +210,12 @@ interface UseChatReturn {
   abortResponse: () => Promise<void>;
   sending: boolean;
 
-  // Search
-  searchResults: ChatMessage[];
-  searchQuery: string;
-  setSearchQuery: (q: string) => void;
-  isSearching: boolean;
-
   // Errors
   sendError: string | null;
   clearSendError: () => void;
 }
 
-export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatReturn {
+export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatOptions): UseChatReturn {
   // ---------------------------------------------------------------------------
   // State
   // ---------------------------------------------------------------------------
@@ -209,15 +224,11 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
   const [currentSessionKey, setCurrentSessionKey] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const [searchQuery, setSearchQueryState] = useState("");
-  const [searchResults, setSearchResults] = useState<ChatMessage[]>([]);
-  const [isSearching, setIsSearching] = useState(false);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [beforeCursor, setBeforeCursor] = useState<string | undefined>(undefined);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [loadingNewer, setLoadingNewer] = useState(false);
 
   // Track active runIds for reconnection timeout
   const activeRunIds = useRef<Set<string>>(new Set());
-  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
 
   // Helper: update both streaming state and ref in sync
@@ -232,12 +243,20 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
   // ---------------------------------------------------------------------------
   // SWR: Message history
   // ---------------------------------------------------------------------------
+  // When anchorMessageId is set, fetch a window around it.
+  // Otherwise fetch the latest messages (default behavior).
+  const swrKey = channelId
+    ? anchorMessageId
+      ? `/api/openclaw/chat?channelId=${channelId}&limit=50&around=${anchorMessageId}`
+      : `/api/openclaw/chat?channelId=${channelId}&limit=50`
+    : null;
+
   const {
     data: historyData,
     isLoading,
     mutate: mutateHistory,
   } = useSWR(
-    channelId ? `/api/openclaw/chat?channelId=${channelId}&limit=50` : null,
+    swrKey,
     historyFetcher,
     {
       revalidateOnFocus: false,
@@ -245,15 +264,29 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
     }
   );
 
-  const messages: ChatMessage[] = historyData?.messages ?? [];
-  const hasMore: boolean = historyData?.hasMore ?? false;
+  // Deduplicate by message ID — race conditions between SWR revalidation,
+  // loadMore pagination, and orphan EventSource can produce duplicate entries.
+  const messages: ChatMessage[] = (() => {
+    const raw = historyData?.messages ?? [];
+    const seen = new Set<string>();
+    return raw.filter((m: ChatMessage) => {
+      if (seen.has(m.id)) return false;
+      seen.add(m.id);
+      return true;
+    });
+  })();
+
+  // Derive bidirectional pagination flags.
+  // Default mode returns { hasMore }, anchor mode returns { hasMoreBefore, hasMoreAfter }.
+  const hasMoreBefore: boolean = historyData?.hasMoreBefore ?? historyData?.hasMore ?? false;
+  const hasMoreAfter: boolean = historyData?.hasMoreAfter ?? false;
 
   // ---------------------------------------------------------------------------
-  // Load more (pagination)
+  // Load older (backward pagination)
   // ---------------------------------------------------------------------------
-  const loadMore = useCallback(async () => {
-    if (loadingMore || !hasMore || messages.length === 0) return;
-    setLoadingMore(true);
+  const loadOlder = useCallback(async () => {
+    if (loadingOlder || !hasMoreBefore || messages.length === 0) return;
+    setLoadingOlder(true);
 
     const oldestId = messages[0]?.id;
     try {
@@ -264,22 +297,81 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
         const data = await res.json();
         const olderMessages: ChatMessage[] = data.messages ?? [];
         if (olderMessages.length > 0) {
-          // Prepend older messages to the SWR cache
+          // Prepend older messages to the SWR cache (dedup on merge)
+          // Evict from the newer end if cache exceeds MAX_CACHED_MESSAGES
           mutateHistory(
-            (current: { messages: ChatMessage[]; hasMore: boolean } | undefined) => ({
-              messages: [...olderMessages, ...(current?.messages ?? [])],
-              hasMore: data.hasMore,
-            }),
+            (current: HistoryData | undefined) => {
+              const existing = current?.messages ?? [];
+              const existingIds = new Set(existing.map((m) => m.id));
+              const unique = olderMessages.filter((m: ChatMessage) => !existingIds.has(m.id));
+              let merged = [...unique, ...existing];
+              let hasMoreAfter = current?.hasMoreAfter ?? false;
+              if (merged.length > MAX_CACHED_MESSAGES) {
+                merged = merged.slice(0, MAX_CACHED_MESSAGES);
+                hasMoreAfter = true;
+              }
+              return {
+                messages: merged,
+                hasMoreBefore: data.hasMore,
+                hasMoreAfter,
+              };
+            },
             { revalidate: false }
           );
         }
       }
     } catch (err) {
-      console.error("[useChat] Load more failed:", err);
+      console.error("[useChat] Load older failed:", err);
     } finally {
-      setLoadingMore(false);
+      setLoadingOlder(false);
     }
-  }, [loadingMore, hasMore, messages, channelId, mutateHistory]);
+  }, [loadingOlder, hasMoreBefore, messages, channelId, mutateHistory]);
+
+  // ---------------------------------------------------------------------------
+  // Load newer (forward pagination) — only used in anchor mode
+  // ---------------------------------------------------------------------------
+  const loadNewer = useCallback(async () => {
+    if (loadingNewer || !hasMoreAfter || messages.length === 0) return;
+    setLoadingNewer(true);
+
+    const newestId = messages[messages.length - 1]?.id;
+    try {
+      const res = await fetch(
+        `/api/openclaw/chat?channelId=${channelId}&limit=50&after=${newestId}`
+      );
+      if (res.ok) {
+        const data = await res.json();
+        const newerMessages: ChatMessage[] = data.messages ?? [];
+        if (newerMessages.length > 0) {
+          // Append newer messages to the SWR cache (dedup on merge)
+          // Evict from the older end if cache exceeds MAX_CACHED_MESSAGES
+          mutateHistory(
+            (current: HistoryData | undefined) => {
+              const existing = current?.messages ?? [];
+              const existingIds = new Set(existing.map((m) => m.id));
+              const unique = newerMessages.filter((m: ChatMessage) => !existingIds.has(m.id));
+              let merged = [...existing, ...unique];
+              let hasMoreBefore = current?.hasMoreBefore ?? false;
+              if (merged.length > MAX_CACHED_MESSAGES) {
+                merged = merged.slice(merged.length - MAX_CACHED_MESSAGES);
+                hasMoreBefore = true;
+              }
+              return {
+                messages: merged,
+                hasMoreBefore,
+                hasMoreAfter: data.hasMore,
+              };
+            },
+            { revalidate: false }
+          );
+        }
+      }
+    } catch (err) {
+      console.error("[useChat] Load newer failed:", err);
+    } finally {
+      setLoadingNewer(false);
+    }
+  }, [loadingNewer, hasMoreAfter, messages, channelId, mutateHistory]);
 
   // ---------------------------------------------------------------------------
   // SSE: Listen for chat events
@@ -647,50 +739,6 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
   }, [channelId, mutateHistory, updateStreaming]);
 
   // ---------------------------------------------------------------------------
-  // Search (debounced FTS5)
-  // ---------------------------------------------------------------------------
-  const setSearchQuery = useCallback(
-    (q: string) => {
-      setSearchQueryState(q);
-
-      if (searchTimerRef.current) {
-        clearTimeout(searchTimerRef.current);
-      }
-
-      if (!q.trim()) {
-        setSearchResults([]);
-        setIsSearching(false);
-        return;
-      }
-
-      setIsSearching(true);
-      searchTimerRef.current = setTimeout(async () => {
-        try {
-          const res = await fetch(
-            `/api/openclaw/chat/search?q=${encodeURIComponent(q)}&channelId=${channelId}`
-          );
-          if (res.ok) {
-            const data = await res.json();
-            setSearchResults(data.results ?? []);
-          }
-        } catch {
-          setSearchResults([]);
-        } finally {
-          setIsSearching(false);
-        }
-      }, 300);
-    },
-    [channelId]
-  );
-
-  // Cleanup search timer
-  useEffect(() => {
-    return () => {
-      if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
-    };
-  }, []);
-
-  // ---------------------------------------------------------------------------
   // Clear error
   // ---------------------------------------------------------------------------
   const clearSendError = useCallback(() => setSendError(null), []);
@@ -705,19 +753,22 @@ export function useChat({ channelId, defaultAgentId }: UseChatOptions): UseChatR
   return {
     messages,
     isLoading,
-    hasMore,
-    loadMore,
-    loadingMore,
+    hasMoreBefore,
+    hasMoreAfter,
+    loadOlder,
+    loadNewer,
+    loadingOlder,
+    loadingNewer,
+    // Backward-compat aliases (used by MessageList's existing scroll-up logic)
+    hasMore: hasMoreBefore,
+    loadMore: loadOlder,
+    loadingMore: loadingOlder,
     streamingMessages,
     isStreaming: streamingMessages.size > 0,
     currentSessionKey,
     sendMessage,
     abortResponse,
     sending,
-    searchResults,
-    searchQuery,
-    setSearchQuery,
-    isSearching,
     sendError,
     clearSendError,
   };

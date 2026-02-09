@@ -9,6 +9,7 @@ import {
   Sun,
   Moon,
   Settings,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 import { CastleIcon } from "@/components/icons/castle-icon";
@@ -16,6 +17,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { usePathname, useRouter } from "next/navigation";
 import { useUserSettings } from "@/lib/hooks/use-user-settings";
+// Search is now a floating bar (top-right), no longer in sidebar
 import { useAgentStatus, USER_STATUS_ID } from "@/lib/hooks/use-agent-status";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 
@@ -58,7 +60,6 @@ function Sidebar({
   const router = useRouter();
   const useLinks = !onNavigate;
   const { tooltips: showTooltips } = useUserSettings();
-
   const activeFromPath = (() => {
     if (!pathname) return "dashboard";
     if (pathname === "/") return "dashboard";
@@ -128,7 +129,7 @@ function SidebarUserMenu() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const router = useRouter();
-  const { avatarUrl } = useUserSettings();
+  const { avatarUrl, isLoading: settingsLoading } = useUserSettings();
   const { getStatus } = useAgentStatus();
   const userStatus = getStatus(USER_STATUS_ID);
   const avatarDotStatus = userStatus === "active" ? "online" as const : "offline" as const;
@@ -151,13 +152,15 @@ function SidebarUserMenu() {
   const isDark = theme === "dark";
 
   return (
-    <div ref={menuRef} className="relative flex justify-center pb-[10px]">
+    <div ref={menuRef} className="relative flex justify-center pb-[8px]">
       <button
         onClick={() => setOpen(!open)}
-        className="group flex items-center justify-center rounded-[4px] cursor-pointer overflow-hidden transition-opacity"
+        className="group flex items-center justify-center rounded-[4px] cursor-pointer transition-opacity"
       >
         <Avatar size="sm" status={avatarDotStatus}>
-          {avatarUrl ? (
+          {settingsLoading ? (
+            <AvatarFallback className="skeleton" />
+          ) : avatarUrl ? (
             <AvatarImage
               src={avatarUrl}
               alt="You"

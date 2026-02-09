@@ -1,7 +1,8 @@
 "use client";
 
 import { use, useState, useEffect } from "react";
-import { WifiOff, X, AlertCircle, Search } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { WifiOff, X, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useOpenClaw } from "@/lib/hooks/use-openclaw";
 import { useChat } from "@/lib/hooks/use-chat";
@@ -10,7 +11,6 @@ import { useUserSettings } from "@/lib/hooks/use-user-settings";
 import { MessageList } from "@/components/chat/message-list";
 import { ChatInput } from "@/components/chat/chat-input";
 import { SessionStatsPanel } from "@/components/chat/session-stats-panel";
-import { SearchPanel } from "@/components/chat/search-panel";
 import { ChatErrorBoundary } from "./error-boundary";
 import type { AgentInfo } from "@/components/chat/agent-mention-popup";
 
@@ -18,13 +18,91 @@ interface ChannelPageProps {
   params: Promise<{ channelId: string }>;
 }
 
+// Module-level flag: once any channel has rendered real content, subsequent
+// channel switches use a smooth opacity transition instead of the skeleton.
+// NOTE: This persists for the entire browser session and never resets.
+// If Castle ever supports logout or multi-user, this will need a reset mechanism.
+let hasEverRendered = false;
+
+// ---------------------------------------------------------------------------
+// Skeleton loader — Facebook-style placeholder while data loads
+// ---------------------------------------------------------------------------
+const LINE_WIDTHS = ["80%", "60%", "40%", "75%", "55%", "85%", "45%", "70%", "50%"];
+
+function SkeletonMessage({ lines = 2, short = false, offset = 0 }: { lines?: number; short?: boolean; offset?: number }) {
+  return (
+    <div className="flex gap-3 mb-[4px]">
+      <div className="skeleton w-9 h-9 rounded-full shrink-0 mt-0.5" />
+      <div className="flex flex-col gap-1.5 flex-1">
+        <div className="flex items-center gap-2">
+          <div className={cn("skeleton h-3.5", short ? "w-16" : "w-24")} />
+          <div className="skeleton h-3 w-14" />
+        </div>
+        {Array.from({ length: lines }).map((_, i) => (
+          <div
+            key={i}
+            className="skeleton h-3.5"
+            style={{ width: LINE_WIDTHS[(offset + i) % LINE_WIDTHS.length] }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChatSkeleton() {
+  return (
+    <div className="flex-1 flex flex-col h-full overflow-hidden">
+      {/* Header skeleton */}
+      <div className="py-4 border-b border-border shrink-0 min-h-[83px] flex items-center">
+        <div>
+          <div className="skeleton h-5 w-40 mb-1.5" />
+          <div className="skeleton h-3.5 w-28" />
+        </div>
+      </div>
+
+      {/* Messages skeleton */}
+      <div className="flex-1 overflow-hidden py-[20px] pr-[20px]">
+        <div className="flex flex-col gap-6">
+          <SkeletonMessage lines={3} offset={0} />
+          <SkeletonMessage lines={1} short offset={3} />
+          <SkeletonMessage lines={2} offset={4} />
+          <SkeletonMessage lines={1} short offset={6} />
+          <SkeletonMessage lines={2} offset={7} />
+          <SkeletonMessage lines={3} offset={1} />
+          <SkeletonMessage lines={1} short offset={5} />
+        </div>
+      </div>
+
+      {/* Real input, just disabled while loading */}
+      <div className="shrink-0">
+        <ChatInput
+          onSend={() => Promise.resolve()}
+          onAbort={() => Promise.resolve()}
+          sending={false}
+          streaming={false}
+          disabled
+          agents={[]}
+          channelId=""
+        />
+      </div>
+    </div>
+  );
+}
+
 function ChannelChatContent({ channelId }: { channelId: string }) {
-  const { agents, isConnected, isLoading: gatewayLoading } = useOpenClaw();
-  const [showSearch, setShowSearch] = useState(false);
+  // Read ?m= param for scroll-to-message from search results.
+  // useSearchParams() is reactive — it updates when the query string
+  // changes, even for same-channel navigation (e.g. clicking two
+  // different search results in the same channel).
+  const searchParams = useSearchParams();
+  const highlightMessageId = searchParams.get("m") || undefined;
+  const { agents, isConnected, isLoading: gatewayLoading, agentsLoading } = useOpenClaw();
   const [channelName, setChannelName] = useState<string | null>(null);
   const [channelAgentIds, setChannelAgentIds] = useState<string[]>([]);
   const [channelCreatedAt, setChannelCreatedAt] = useState<number | null>(null);
-  const { displayName, avatarUrl: userAvatar } = useUserSettings();
+  const [channelArchived, setChannelArchived] = useState(false);
+  const { displayName, avatarUrl: userAvatar, isLoading: userSettingsLoading } = useUserSettings();
 
   // Mark this channel as last accessed and fetch channel info
   useEffect(() => {
@@ -35,7 +113,9 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
       body: JSON.stringify({ action: "touch", id: channelId }),
     }).catch(() => {});
 
-    // Fetch channel details for the name and agents
+    // Fetch channel details for the name and agents.
+    // Try active channels first, then archived if not found.
+    // Falls back to channelId as name if both fail (prevents stuck loading).
     fetch("/api/openclaw/chat/channels")
       .then((r) => r.json())
       .then((data) => {
@@ -47,9 +127,32 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
           setChannelName(ch.name);
           setChannelAgentIds(ch.agents || []);
           setChannelCreatedAt(ch.createdAt ?? null);
+          setChannelArchived(false);
+        } else {
+          // Channel not in active list — check archived channels
+          return fetch("/api/openclaw/chat/channels?archived=1")
+            .then((r) => r.json())
+            .then((archived) => {
+              const archivedCh = (archived.channels || []).find(
+                (c: { id: string; name: string; agents?: string[] }) =>
+                  c.id === channelId
+              );
+              if (archivedCh) {
+                setChannelName(archivedCh.name);
+                setChannelAgentIds(archivedCh.agents || []);
+                setChannelCreatedAt(archivedCh.createdAt ?? null);
+                setChannelArchived(true);
+              } else {
+                // Channel not found anywhere — use ID as fallback name
+                setChannelName("Chat");
+              }
+            });
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        // Network error — fall back so page doesn't stay stuck
+        setChannelName("Chat");
+      });
   }, [channelId]);
 
   // Map agents to the AgentInfo format used by chat components
@@ -68,34 +171,45 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
     hasMore,
     loadMore,
     loadingMore,
+    hasMoreAfter,
+    loadNewer,
+    loadingNewer,
     streamingMessages,
     isStreaming,
     currentSessionKey,
     sendMessage,
     abortResponse,
     sending,
-    searchResults,
-    searchQuery,
-    setSearchQuery,
-    isSearching,
     sendError,
     clearSendError,
-  } = useChat({ channelId, defaultAgentId });
+  } = useChat({ channelId, defaultAgentId, anchorMessageId: highlightMessageId });
 
   const { stats, isLoading: statsLoading } = useSessionStats({
     sessionKey: currentSessionKey,
   });
 
-  // Don't render until channel info has loaded to prevent FOUC
-  const channelReady = channelName !== null;
+  // Don't render until channel name, agents, and user settings have all loaded.
+  const channelReady = channelName !== null && !agentsLoading && !userSettingsLoading;
+
+  // First cold load → skeleton. If agents/user are already cached (e.g.
+  // navigated from dashboard) or we've rendered before, use opacity transition.
+  const dataAlreadyCached = !agentsLoading && !userSettingsLoading;
+  if (channelReady) hasEverRendered = true;
+
+  if (!channelReady && !hasEverRendered && !dataAlreadyCached) {
+    return <ChatSkeleton />;
+  }
 
   return (
     <div className={cn("flex-1 flex flex-col h-full overflow-hidden transition-opacity duration-150", channelReady ? "opacity-100" : "opacity-0")}>
       {/* Channel header — sticky */}
-      <div className="py-4 border-b border-border flex items-center justify-between shrink-0">
+      <div className="pb-4 border-b border-border flex items-center justify-between shrink-0 min-h-[83px]">
         <div>
           <h2 className="text-lg font-semibold text-foreground">
-            {channelName || ""}
+            {channelName}
+            {channelArchived && (
+              <span className="ml-2 text-sm font-normal text-foreground-secondary">(Archived)</span>
+            )}
           </h2>
           {(displayName || channelAgentIds.length > 0) && agents.length > 0 && (
             <p className="text-sm text-foreground-secondary mt-0.5">
@@ -113,30 +227,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
             </p>
           )}
         </div>
-        <button
-          onClick={() => setShowSearch(!showSearch)}
-          className="p-1.5 rounded-md text-foreground-secondary hover:text-foreground hover:bg-surface-hover transition-colors"
-          title="Search messages (Ctrl+F)"
-        >
-          <Search className="h-4 w-4" />
-        </button>
       </div>
-
-      {/* Search panel — sticky */}
-      {showSearch && (
-        <div className="shrink-0">
-          <SearchPanel
-            query={searchQuery}
-            onQueryChange={setSearchQuery}
-            results={searchResults}
-            isSearching={isSearching}
-            onClose={() => {
-              setShowSearch(false);
-              setSearchQuery("");
-            }}
-          />
-        </div>
-      )}
 
       {/* Connection warning banner — sticky */}
       {!isConnected && !gatewayLoading && (
@@ -161,9 +252,13 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
         userAvatar={userAvatar}
         streamingMessages={streamingMessages}
         onLoadMore={loadMore}
+        hasMoreAfter={hasMoreAfter}
+        onLoadNewer={loadNewer}
+        loadingNewer={loadingNewer}
         channelId={channelId}
         channelName={channelName}
         channelCreatedAt={channelCreatedAt}
+        highlightMessageId={highlightMessageId}
       />
 
       {/* Error toast — sticky above input */}

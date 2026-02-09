@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { MessageCircle, Loader2, Archive } from "lucide-react";
+import { Hash, MessageCircle, Loader2, Archive } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import type { Channel } from "@/lib/types/chat";
@@ -54,10 +54,15 @@ export function ChannelList({
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>
-      {/* Loading */}
+      {/* Loading skeleton */}
       {loading && (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-foreground-secondary" />
+        <div className="flex flex-col gap-1">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex items-center gap-1.5 px-2 h-[34px] rounded-[var(--radius-sm)]">
+              <div className="skeleton h-4 w-4 rounded shrink-0" />
+              <div className="skeleton h-3.5 rounded" style={{ width: `${50 + i * 12}%` }} />
+            </div>
+          ))}
         </div>
       )}
 
@@ -88,13 +93,13 @@ export function ChannelList({
               onClick={() => router.push(`/chat/${channel.id}`)}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") router.push(`/chat/${channel.id}`); }}
               className={cn(
-                "selectable-list-item transition-colors group relative flex items-center gap-2.5 w-full text-left cursor-pointer",
+                "selectable-list-item transition-colors group relative flex items-center gap-1.5 w-full text-left cursor-pointer",
                 activeChannelId === channel.id
                   ? "bg-accent/10 text-accent"
                   : "text-foreground"
               )}
             >
-              <MessageCircle className="h-4 w-4 shrink-0" />
+              <Hash className="h-4 w-4 shrink-0" strokeWidth={2.5} />
               <span className="truncate flex-1 min-w-0">{channel.name}</span>
               <button
                 onClick={async (e) => {

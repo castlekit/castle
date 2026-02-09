@@ -25,7 +25,7 @@ const MAX_BACKUPS = 5;
 const CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000;
 
 /** Current schema version — bump when adding new migrations */
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 // ============================================================================
 // Singleton
@@ -389,6 +389,12 @@ const TABLE_SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_attachments_message ON message_attachments(message_id);
 
+  CREATE TABLE IF NOT EXISTS recent_searches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    query TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS message_reactions (
     id TEXT PRIMARY KEY,
     message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -467,6 +473,21 @@ function runMigrations(
     `);
   }
 
+  // --- Migration 5: Create recent_searches table ---
+  const recentSearchesTable = sqlite
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='recent_searches'")
+    .get() as { name: string } | undefined;
+  if (!recentSearchesTable) {
+    console.log("[Castle DB] Migration: creating recent_searches table");
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS recent_searches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        query TEXT NOT NULL,
+        created_at INTEGER NOT NULL
+      )
+    `);
+  }
+
   // Checkpoint after migration to persist changes to main DB file immediately
   checkpointWal(sqlite, "TRUNCATE");
 
@@ -527,21 +548,27 @@ function createDb(): {
   // Create FTS5 virtual table and triggers (only if they don't already exist)
   sqlite.exec(FTS5_CREATE);
 
-  // If FTS5 is empty but messages exist (e.g. after a previous broken drop/recreate),
-  // repopulate the FTS5 index from the messages table.
+  // Ensure FTS5 index is in sync with the messages table.
+  // This handles: empty index, out-of-sync entries (e.g. after crashes or
+  // previous bugs), and any other corruption that would cause "SQL logic error"
+  // when the FTS5 delete trigger fires.
   const ftsCount = sqlite.prepare(
     "SELECT COUNT(*) as c FROM messages_fts"
   ).get() as { c: number };
   const msgCount = sqlite.prepare(
     "SELECT COUNT(*) as c FROM messages"
   ).get() as { c: number };
-  if (ftsCount.c === 0 && msgCount.c > 0) {
+
+  if (ftsCount.c !== msgCount.c) {
     console.log(
-      `[Castle DB] Repopulating FTS5 index for ${msgCount.c} messages...`
+      `[Castle DB] FTS5 index out of sync (fts: ${ftsCount.c}, messages: ${msgCount.c}). Rebuilding...`
     );
+    // Full rebuild: drop all FTS5 content, re-insert from messages table
+    sqlite.exec("DELETE FROM messages_fts");
     sqlite.exec(
       "INSERT INTO messages_fts(rowid, content) SELECT rowid, content FROM messages"
     );
+    console.log("[Castle DB] FTS5 index rebuilt successfully.");
   }
 
   // Checkpoint after all schema setup to flush everything to main file

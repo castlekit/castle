@@ -7,6 +7,8 @@ import {
   updateMessage,
   deleteMessage,
   getMessagesByChannel,
+  getMessagesAfter,
+  getMessagesAround,
   getMessageByRunId,
   getLatestSessionKey,
   createSession,
@@ -209,12 +211,17 @@ export async function DELETE(request: NextRequest) {
 
 // ============================================================================
 // GET /api/openclaw/chat?channelId=X&limit=50&before=Y — Load history
+//   ?around=msgId — Load a window centered on a specific message
+//   ?after=msgId  — Forward pagination (newer messages)
+//   ?before=msgId — Backward pagination (older messages, existing)
 // ============================================================================
 
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
   const channelId = searchParams.get("channelId");
   const limit = Math.min(parseInt(searchParams.get("limit") || "50", 10), 200);
+  const around = searchParams.get("around") || undefined;
+  const after = searchParams.get("after") || undefined;
   const before = searchParams.get("before") || undefined;
 
   if (!channelId) {
@@ -222,6 +229,34 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Anchor mode: load a window of messages around a specific message
+    if (around) {
+      const result = getMessagesAround(channelId, around, limit);
+      if (!result) {
+        // Anchor message not found — fall back to latest messages
+        const msgs = getMessagesByChannel(channelId, limit);
+        return NextResponse.json({
+          messages: msgs,
+          hasMore: msgs.length === limit,
+        });
+      }
+      return NextResponse.json({
+        messages: result.messages,
+        hasMoreBefore: result.hasMoreBefore,
+        hasMoreAfter: result.hasMoreAfter,
+      });
+    }
+
+    // Forward pagination: load messages newer than cursor
+    if (after) {
+      const msgs = getMessagesAfter(channelId, after, limit);
+      return NextResponse.json({
+        messages: msgs,
+        hasMore: msgs.length === limit,
+      });
+    }
+
+    // Default / backward pagination
     const msgs = getMessagesByChannel(channelId, limit, before);
     return NextResponse.json({
       messages: msgs,

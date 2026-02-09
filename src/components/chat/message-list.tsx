@@ -6,6 +6,7 @@ import { MessageBubble } from "./message-bubble";
 import { SessionDivider } from "./session-divider";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useAgentStatus, setAgentActive, getThinkingChannel, USER_STATUS_ID } from "@/lib/hooks/use-agent-status";
+import { formatDate } from "@/lib/date-utils";
 import type { ChatMessage, ChannelSession, StreamingMessage } from "@/lib/types/chat";
 import type { AgentInfo } from "./agent-mention-popup";
 
@@ -65,9 +66,16 @@ interface MessageListProps {
   userAvatar?: string | null;
   streamingMessages?: Map<string, StreamingMessage>;
   onLoadMore?: () => void;
+  /** Whether there are newer messages to load (anchor mode) */
+  hasMoreAfter?: boolean;
+  /** Callback to load newer messages (anchor mode) */
+  onLoadNewer?: () => void;
+  /** Whether newer messages are currently loading */
+  loadingNewer?: boolean;
   channelId?: string;
   channelName?: string | null;
   channelCreatedAt?: number | null;
+  highlightMessageId?: string;
 }
 
 export function MessageList({
@@ -80,9 +88,13 @@ export function MessageList({
   userAvatar,
   streamingMessages,
   onLoadMore,
+  hasMoreAfter,
+  onLoadNewer,
+  loadingNewer,
   channelId,
   channelName,
   channelCreatedAt,
+  highlightMessageId,
 }: MessageListProps) {
   const { statuses: agentStatuses, getStatus: getAgentStatus } = useAgentStatus();
   const userStatus = getAgentStatus(USER_STATUS_ID);
@@ -118,6 +130,8 @@ export function MessageList({
   const isInitialLoad = useRef(true);
   const pinnedToBottom = useRef(true);
   const isLoadingOlder = useRef(false);
+  const prevScrollHeightRef = useRef<number>(0);
+  const highlightHandled = useRef<string | null>(null);
 
   // Scroll helper
   const scrollToBottom = useCallback(() => {
@@ -154,47 +168,89 @@ export function MessageList({
     return () => observer.disconnect();
   }, [scrollToBottom]);
 
-  // Initial scroll before paint
+  // Initial scroll before paint — skip if we have a highlight target
   useLayoutEffect(() => {
     if (isInitialLoad.current && messages.length > 0) {
-      pinnedToBottom.current = true;
-      scrollToBottom();
-      requestAnimationFrame(scrollToBottom);
+      if (!highlightMessageId) {
+        pinnedToBottom.current = true;
+        scrollToBottom();
+        requestAnimationFrame(scrollToBottom);
+      }
       isInitialLoad.current = false;
     }
-  }, [messages.length, scrollToBottom]);
+  }, [messages.length, scrollToBottom, highlightMessageId]);
 
   // Re-pin to bottom when new messages arrive or streaming changes,
-  // but NOT when loading older messages via infinite scroll.
+  // but NOT when loading older messages via infinite scroll,
+  // and NOT when a highlight target is active.
   useLayoutEffect(() => {
     if (!isInitialLoad.current) {
       if (isLoadingOlder.current) {
+        // Restore scroll position after older messages are prepended.
+        // The new content pushes everything down, so we adjust scrollTop
+        // by the difference in scrollHeight to keep the user at the same spot.
+        const container = scrollContainerRef.current;
+        if (container && prevScrollHeightRef.current > 0) {
+          const newScrollHeight = container.scrollHeight;
+          const delta = newScrollHeight - prevScrollHeightRef.current;
+          container.scrollTop += delta;
+        }
+        prevScrollHeightRef.current = 0;
         isLoadingOlder.current = false;
-      } else {
-        pinnedToBottom.current = true;
+      } else if (highlightMessageId) {
+        // Don't auto-pin while a highlight target is active —
+        // let the highlight scroll and user scrolling manage pinning.
+      } else if (pinnedToBottom.current) {
+        // Only re-pin if already pinned (e.g. new incoming message while at bottom).
+        // Don't force-pin when user has scrolled away.
       }
     }
-  }, [messages, streamingMessages]);
+  }, [messages, streamingMessages, highlightMessageId]);
 
   // EVERY render: if pinned, scroll to bottom BEFORE paint.
-  // This catches container resizes (e.g. input box shrinks when cleared)
-  // that would otherwise cause a one-frame content shift.
   useLayoutEffect(() => {
     if (pinnedToBottom.current) {
       scrollToBottom();
     }
   });
 
-  // Infinite scroll up for loading older messages + track pinned state
+  // Scroll to highlighted message — MUST be the LAST useLayoutEffect so it
+  // runs after all the pinning/scrolling effects above and gets the final say.
+  useLayoutEffect(() => {
+    if (!highlightMessageId) return;
+    if (highlightMessageId === highlightHandled.current) return;
+    if (messages.length === 0) return;
+
+    const el = document.getElementById(`msg-${highlightMessageId}`);
+    if (el) {
+      highlightHandled.current = highlightMessageId;
+      pinnedToBottom.current = false;
+      el.scrollIntoView({ behavior: "instant", block: "center" });
+    }
+  }, [highlightMessageId, messages]);
+
+  // Infinite scroll: up for older messages, down for newer messages
   const handleScroll = useCallback(() => {
     checkIfPinned();
-    if (!scrollContainerRef.current || !hasMore || loadingMore || !onLoadMore) return;
-    const { scrollTop } = scrollContainerRef.current;
-    if (scrollTop < 100) {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = container;
+
+    // Load older messages when scrolling near the top
+    if (scrollTop < 200 && hasMore && !loadingMore && onLoadMore) {
       isLoadingOlder.current = true;
+      prevScrollHeightRef.current = scrollHeight;
+      pinnedToBottom.current = false;
       onLoadMore();
     }
-  }, [hasMore, loadingMore, onLoadMore, checkIfPinned]);
+
+    // Load newer messages when scrolling near the bottom (anchor mode)
+    const scrollBottom = scrollHeight - scrollTop - clientHeight;
+    if (scrollBottom < 100 && hasMoreAfter && !loadingNewer && onLoadNewer) {
+      onLoadNewer();
+    }
+  }, [hasMore, loadingMore, onLoadMore, hasMoreAfter, loadingNewer, onLoadNewer, checkIfPinned]);
 
   const getAgentName = (agentId: string) => {
     const agent = agents.find((a) => a.id === agentId);
@@ -206,15 +262,7 @@ export function MessageList({
     return agent?.avatar;
   };
 
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <Loader2 className="h-5 w-5 animate-spin text-foreground-secondary" />
-      </div>
-    );
-  }
-
-  if (messages.length === 0 && (!streamingMessages || streamingMessages.size === 0)) {
+  if (!loading && messages.length === 0 && (!streamingMessages || streamingMessages.size === 0)) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="flex flex-col items-center">
@@ -239,12 +287,7 @@ export function MessageList({
     if (isToday) return "Today";
     if (isYesterday) return "Yesterday";
 
-    return date.toLocaleDateString(undefined, {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
-    });
+    return formatDate(timestamp);
   };
 
   // Get the date string (YYYY-MM-DD) for grouping
@@ -320,7 +363,7 @@ export function MessageList({
           <div className="flex flex-col items-center py-8 mb-2">
             <CalendarDays className="h-9 w-9 text-foreground-secondary/40 mb-3" />
             <span className="text-sm font-medium text-foreground-secondary">
-              Channel created on {new Date(channelCreatedAt).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}
+              Channel created on {formatDate(new Date(channelCreatedAt).getTime())}
             </span>
             <span className="text-xs text-foreground-secondary/60 mt-1">
               This is the very beginning of the conversation
@@ -334,7 +377,7 @@ export function MessageList({
               return (
                 <div
                   key={`date-${item.key}`}
-                  className="flex items-center gap-3 py-1"
+                  className="flex items-center gap-3 py-1 my-[30px]"
                 >
                   <div className="flex-1 h-px bg-border" />
                   <span className="text-xs font-medium text-foreground-secondary shrink-0">
@@ -367,20 +410,40 @@ export function MessageList({
             && prevMessage.senderId === message.senderId;
 
           return (
-            <MessageBubble
-              key={message.id}
-              message={message}
-              isAgent={message.senderType === "agent"}
-              agentName={agent?.name || getAgentName(message.senderId)}
-              agentAvatar={agent?.avatar || getAgentAvatar(message.senderId)}
-              userAvatar={userAvatar}
-              agents={agents}
-              showHeader={!isSameSender}
-              agentStatus={message.senderType === "agent" ? getAgentStatus(message.senderId) : undefined}
-              userStatus={message.senderType === "user" ? userStatus : undefined}
-            />
+            <div key={message.id} id={`msg-${message.id}`}>
+              <MessageBubble
+                message={message}
+                isAgent={message.senderType === "agent"}
+                agentName={agent?.name || getAgentName(message.senderId)}
+                agentAvatar={agent?.avatar || getAgentAvatar(message.senderId)}
+                userAvatar={userAvatar}
+                agents={agents}
+                showHeader={!isSameSender}
+                agentStatus={message.senderType === "agent" ? getAgentStatus(message.senderId) : undefined}
+                userStatus={message.senderType === "user" ? userStatus : undefined}
+                highlighted={highlightMessageId === message.id}
+              />
+            </div>
           );
         })}
+
+        {/* Loading newer messages indicator (anchor mode) */}
+        {loadingNewer && (
+          <div className="flex justify-center py-2">
+            <Loader2 className="h-4 w-4 animate-spin text-foreground-secondary" />
+          </div>
+        )}
+
+        {hasMoreAfter && !loadingNewer && (
+          <div className="flex justify-center py-2">
+            <button
+              onClick={onLoadNewer}
+              className="text-xs text-foreground-secondary hover:text-foreground transition-colors"
+            >
+              Load newer messages
+            </button>
+          </div>
+        )}
 
         {/* Typing indicator — shows dots until the final message is persisted */}
         {streamingMessages &&

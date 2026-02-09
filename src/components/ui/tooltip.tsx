@@ -9,16 +9,20 @@ export interface TooltipProps {
   content: string;
   side?: "top" | "right" | "bottom" | "left";
   className?: string;
+  /** Delay in ms before showing the tooltip (default 0) */
+  delay?: number;
 }
 
 function Tooltip({ 
   children, 
   content, 
   side = "right",
-  className 
+  className,
+  delay = 0,
 }: TooltipProps) {
   const [isHovered, setIsHovered] = useState(false);
   const [mounted, setMounted] = useState(false);
+  const delayRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [isPositioned, setIsPositioned] = useState(false);
   const triggerRef = useRef<HTMLDivElement>(null);
@@ -26,6 +30,10 @@ function Tooltip({
 
   useEffect(() => {
     setMounted(true);
+    return () => {
+      // Clean up delay timer on unmount to prevent setState on unmounted component
+      if (delayRef.current) clearTimeout(delayRef.current);
+    };
   }, []);
 
   const updatePosition = useCallback(() => {
@@ -83,8 +91,17 @@ function Tooltip({
     <>
       <div
         ref={triggerRef}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
+        onMouseEnter={() => {
+          if (delay > 0) {
+            delayRef.current = setTimeout(() => setIsHovered(true), delay);
+          } else {
+            setIsHovered(true);
+          }
+        }}
+        onMouseLeave={() => {
+          if (delayRef.current) { clearTimeout(delayRef.current); delayRef.current = null; }
+          setIsHovered(false);
+        }}
         className={className}
       >
         {children}
@@ -110,26 +127,26 @@ function Tooltip({
                   side === "bottom" && (isPositioned ? "translate-y-0" : "-translate-y-2")
                 )}
               >
-                <div className="relative bg-foreground text-background text-sm font-medium px-3 py-1.5 rounded-[4px] whitespace-nowrap shadow-xl shadow-black/25">
+                <div className="relative bg-[#1a1a1a] text-white text-sm font-medium px-3 py-1.5 rounded-[4px] whitespace-nowrap shadow-xl shadow-black/25">
                   {content}
                   {side === "right" && (
                     <div className="absolute -left-[7px] top-1/2 -translate-y-1/2">
-                      <div className="w-0 h-0 border-t-[8px] border-t-transparent border-b-[8px] border-b-transparent border-r-[8px] border-r-foreground" />
+                      <div className="w-0 h-0 border-t-[8px] border-t-transparent border-b-[8px] border-b-transparent border-r-[8px] border-r-[#1a1a1a]" />
                     </div>
                   )}
                   {side === "left" && (
                     <div className="absolute -right-[7px] top-1/2 -translate-y-1/2">
-                      <div className="w-0 h-0 border-t-[8px] border-t-transparent border-b-[8px] border-b-transparent border-l-[8px] border-l-foreground" />
+                      <div className="w-0 h-0 border-t-[8px] border-t-transparent border-b-[8px] border-b-transparent border-l-[8px] border-l-[#1a1a1a]" />
                     </div>
                   )}
                   {side === "top" && (
                     <div className="absolute -bottom-[7px] left-1/2 -translate-x-1/2">
-                      <div className="w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-t-[8px] border-t-foreground" />
+                      <div className="w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-t-[8px] border-t-[#1a1a1a]" />
                     </div>
                   )}
                   {side === "bottom" && (
                     <div className="absolute -top-[7px] left-1/2 -translate-x-1/2">
-                      <div className="w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-b-[8px] border-b-foreground" />
+                      <div className="w-0 h-0 border-l-[8px] border-l-transparent border-r-[8px] border-r-transparent border-b-[8px] border-b-[#1a1a1a]" />
                     </div>
                   )}
                 </div>

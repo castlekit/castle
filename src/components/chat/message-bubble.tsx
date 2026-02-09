@@ -3,7 +3,9 @@
 import React from "react";
 import { Bot, User, AlertTriangle, StopCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatTime, formatDateTime } from "@/lib/date-utils";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownContent } from "./markdown-content";
 import { TwemojiText } from "@/components/ui/twemoji-text";
 import type { ChatMessage } from "@/lib/types/chat";
@@ -22,6 +24,7 @@ interface MessageBubbleProps {
   showHeader?: boolean;
   agentStatus?: AgentStatus;
   userStatus?: AgentStatus;
+  highlighted?: boolean;
 }
 
 export function MessageBubble({
@@ -35,20 +38,16 @@ export function MessageBubble({
   showHeader = true,
   agentStatus,
   userStatus,
+  highlighted,
 }: MessageBubbleProps) {
-  const formattedTime = new Date(message.createdAt).toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
+  const formattedTime = formatTime(message.createdAt);
+  const fullDateTime = formatDateTime(message.createdAt);
 
-  const getAgentDisplayName = () => {
-    if (agentName) return agentName;
-    if (message.senderName) return `${message.senderName} (Removed)`;
-    return "Unknown Agent";
-  };
-
-  const displayName = isAgent ? getAgentDisplayName() : "You";
+  // Prefer the name stored on the message (always available from DB, no FOUC).
+  // Fall back to the live agent name from the gateway, then a generic label.
+  const displayName = isAgent
+    ? (message.senderName || agentName || "Unknown Agent")
+    : "You";
   const avatarSrc = isAgent ? agentAvatar : userAvatar;
   const hasAttachments = message.attachments && message.attachments.length > 0;
 
@@ -60,7 +59,7 @@ export function MessageBubble({
     : undefined;
 
   return (
-    <div className={cn("flex gap-3", showHeader ? "mt-4 first:mt-0" : "mt-0.5 pl-[48px]")}>
+    <div className={cn("flex gap-3", showHeader ? "mb-[4px] first:mt-0" : "mt-0.5 pl-[48px]", highlighted && "bg-accent/10 -mx-2 px-2 py-1")}>
       {/* Avatar — only shown on first message in a group */}
       {showHeader && (
         <div className="mt-0.5">
@@ -84,13 +83,15 @@ export function MessageBubble({
       <div className="flex flex-col min-w-0">
         {/* Name + time header — only on first message in a group */}
         {showHeader && (
-          <div className="flex items-baseline gap-2 mb-0.5">
+          <div className="flex items-baseline gap-2">
             <span className="font-bold text-[15px] text-foreground">
               {displayName}
             </span>
-            <span className="text-xs text-foreground-secondary">
-              {formattedTime}
-            </span>
+            <Tooltip content={fullDateTime} side="top" delay={800}>
+              <span className="text-xs text-foreground-secondary hover:text-foreground cursor-pointer transition-colors">
+                {formattedTime}
+              </span>
+            </Tooltip>
           </div>
         )}
 
@@ -109,7 +110,7 @@ export function MessageBubble({
         )}
 
         {/* Message text — no bubble, just plain text */}
-        <div className="text-[15px] text-foreground leading-[26px] break-all">
+        <div className="text-[15px] text-foreground leading-[26px] break-words">
           <TwemojiText>
             {isAgent && message.content ? (
               <MarkdownContent content={message.content} />

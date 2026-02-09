@@ -1,4 +1,4 @@
-import { eq, desc, and, lt, sql, inArray } from "drizzle-orm";
+import { eq, desc, asc, and, lt, gt, sql, inArray } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { getDb } from "./index";
 import {
@@ -8,6 +8,7 @@ import {
   messages,
   messageAttachments,
   messageReactions,
+  recentSearches,
   settings,
   agentStatuses,
 } from "./schema";
@@ -65,23 +66,31 @@ export function getChannels(includeArchived = false): Channel[] {
     : db.select().from(channels).where(sql`${channels.archivedAt} IS NULL`).orderBy(desc(channels.createdAt));
 
   const rows = query.all();
+  if (rows.length === 0) return [];
 
-  return rows.map((row) => {
-    const agentRows = db
-      .select()
-      .from(channelAgents)
-      .where(eq(channelAgents.channelId, row.id))
-      .all();
+  // Batch-load all channel agents in one query (avoids N+1)
+  const channelIds = rows.map((r) => r.id);
+  const allAgentRows = db
+    .select()
+    .from(channelAgents)
+    .where(inArray(channelAgents.channelId, channelIds))
+    .all();
 
-    return {
-      id: row.id,
-      name: row.name,
-      defaultAgentId: row.defaultAgentId,
-      agents: agentRows.map((a) => a.agentId),
-      createdAt: row.createdAt,
-      archivedAt: row.archivedAt ?? null,
-    };
-  });
+  const agentsByChannel = new Map<string, string[]>();
+  for (const a of allAgentRows) {
+    const list = agentsByChannel.get(a.channelId) || [];
+    list.push(a.agentId);
+    agentsByChannel.set(a.channelId, list);
+  }
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    defaultAgentId: row.defaultAgentId,
+    agents: agentsByChannel.get(row.id) || [],
+    createdAt: row.createdAt,
+    archivedAt: row.archivedAt ?? null,
+  }));
 }
 
 export function getChannel(id: string): Channel | null {
@@ -120,8 +129,57 @@ export function updateChannel(
 
 export function deleteChannel(id: string): boolean {
   const db = getDb();
-  const result = db.delete(channels).where(eq(channels.id, id)).run();
-  return result.changes > 0;
+
+  // Access underlying better-sqlite3 for raw SQL operations
+  type SqliteClient = {
+    prepare: (sql: string) => { run: (...params: unknown[]) => { changes: number }; all: (...params: unknown[]) => Record<string, unknown>[] };
+    exec: (sql: string) => void;
+  };
+  type DrizzleDb = { session: { client: SqliteClient } };
+  const sqlite = (db as unknown as DrizzleDb).session.client;
+
+  // The FTS5 delete trigger can fail with "SQL logic error" if the FTS5 index
+  // is out of sync with the messages table. To avoid this:
+  // 1. Drop the FTS5 delete trigger
+  // 2. Delete all dependent records and the channel
+  // 3. Recreate the trigger
+  // 4. Rebuild the FTS5 index to stay in sync
+  sqlite.exec("DROP TRIGGER IF EXISTS messages_fts_delete");
+
+  try {
+    // Delete dependent records: attachments/reactions → messages → sessions → agents → channel
+    const msgIds = db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(eq(messages.channelId, id))
+      .all()
+      .map((r) => r.id);
+
+    if (msgIds.length > 0) {
+      db.delete(messageAttachments)
+        .where(inArray(messageAttachments.messageId, msgIds))
+        .run();
+      db.delete(messageReactions)
+        .where(inArray(messageReactions.messageId, msgIds))
+        .run();
+    }
+
+    db.delete(messages).where(eq(messages.channelId, id)).run();
+    db.delete(sessions).where(eq(sessions.channelId, id)).run();
+    db.delete(channelAgents).where(eq(channelAgents.channelId, id)).run();
+
+    const result = db.delete(channels).where(eq(channels.id, id)).run();
+    return result.changes > 0;
+  } finally {
+    // Always recreate the trigger and rebuild FTS5 index
+    sqlite.exec(`
+      CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', OLD.rowid, OLD.content);
+      END;
+    `);
+    // Rebuild FTS5 to stay in sync after bulk deletion
+    sqlite.exec("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')");
+  }
 }
 
 export function archiveChannel(id: string): boolean {
@@ -261,56 +319,13 @@ export function deleteMessage(id: string): boolean {
 }
 
 /**
- * Get messages for a channel with cursor-based pagination.
- * @param channelId - Channel to load messages for
- * @param limit - Max messages to return (default 50)
- * @param before - Message ID cursor — returns messages older than this
+ * Hydrate raw message rows with attachments and reactions.
+ * Shared by getMessagesByChannel, getMessagesAfter, and getMessagesAround.
  */
-export function getMessagesByChannel(
-  channelId: string,
-  limit = 50,
-  before?: string
-): ChatMessage[] {
+function hydrateMessages(rows: typeof messages.$inferSelect[]): ChatMessage[] {
   const db = getDb();
-
-  let query;
-  if (before) {
-    // Get the createdAt of the cursor message
-    const cursor = db
-      .select({ createdAt: messages.createdAt })
-      .from(messages)
-      .where(eq(messages.id, before))
-      .get();
-
-    if (!cursor) return [];
-
-    query = db
-      .select()
-      .from(messages)
-      .where(
-        and(
-          eq(messages.channelId, channelId),
-          lt(messages.createdAt, cursor.createdAt)
-        )
-      )
-      .orderBy(desc(messages.createdAt))
-      .limit(limit)
-      .all();
-  } else {
-    query = db
-      .select()
-      .from(messages)
-      .where(eq(messages.channelId, channelId))
-      .orderBy(desc(messages.createdAt))
-      .limit(limit)
-      .all();
-  }
-
-  // Reverse to chronological order
-  const rows = query.reverse();
-
-  // Batch-load attachments and reactions
   const messageIds = rows.map((r) => r.id);
+
   const attachmentRows = messageIds.length > 0
     ? db.select().from(messageAttachments).where(inArray(messageAttachments.messageId, messageIds)).all()
     : [];
@@ -366,6 +381,153 @@ export function getMessagesByChannel(
     attachments: attachmentsByMsg.get(row.id) || [],
     reactions: reactionsByMsg.get(row.id) || [],
   }));
+}
+
+/**
+ * Get messages for a channel with cursor-based pagination.
+ * @param channelId - Channel to load messages for
+ * @param limit - Max messages to return (default 50)
+ * @param before - Message ID cursor — returns messages older than this
+ */
+export function getMessagesByChannel(
+  channelId: string,
+  limit = 50,
+  before?: string
+): ChatMessage[] {
+  const db = getDb();
+
+  let query;
+  if (before) {
+    const cursor = db
+      .select({ createdAt: messages.createdAt, id: messages.id })
+      .from(messages)
+      .where(eq(messages.id, before))
+      .get();
+
+    if (!cursor) return [];
+
+    // Composite cursor (createdAt, id) to avoid skipping messages with identical timestamps
+    query = db
+      .select()
+      .from(messages)
+      .where(
+        and(
+          eq(messages.channelId, channelId),
+          sql`(${messages.createdAt}, ${messages.id}) < (${cursor.createdAt}, ${cursor.id})`
+        )
+      )
+      .orderBy(desc(messages.createdAt))
+      .limit(limit)
+      .all();
+  } else {
+    query = db
+      .select()
+      .from(messages)
+      .where(eq(messages.channelId, channelId))
+      .orderBy(desc(messages.createdAt))
+      .limit(limit)
+      .all();
+  }
+
+  // Reverse to chronological order
+  return hydrateMessages(query.reverse());
+}
+
+/**
+ * Get messages for a channel AFTER a cursor (forward pagination).
+ * Returns messages newer than the cursor, in chronological order.
+ */
+export function getMessagesAfter(
+  channelId: string,
+  afterId: string,
+  limit = 50
+): ChatMessage[] {
+  const db = getDb();
+
+  const cursor = db
+    .select({ createdAt: messages.createdAt, id: messages.id })
+    .from(messages)
+    .where(eq(messages.id, afterId))
+    .get();
+
+  if (!cursor) return [];
+
+  // Composite cursor (createdAt, id) to avoid skipping messages with identical timestamps
+  const rows = db
+    .select()
+    .from(messages)
+    .where(
+      and(
+        eq(messages.channelId, channelId),
+        sql`(${messages.createdAt}, ${messages.id}) > (${cursor.createdAt}, ${cursor.id})`
+      )
+    )
+    .orderBy(asc(messages.createdAt))
+    .limit(limit)
+    .all();
+
+  return hydrateMessages(rows);
+}
+
+/**
+ * Get a window of messages around an anchor message.
+ * Returns ~limit messages centered on the anchor, plus hasMoreBefore/hasMoreAfter flags.
+ */
+export function getMessagesAround(
+  channelId: string,
+  anchorMessageId: string,
+  limit = 50
+): { messages: ChatMessage[]; hasMoreBefore: boolean; hasMoreAfter: boolean } | null {
+  const db = getDb();
+
+  // Look up the anchor message
+  const anchor = db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.id, anchorMessageId), eq(messages.channelId, channelId)))
+    .get();
+
+  if (!anchor) return null;
+
+  const half = Math.floor(limit / 2);
+
+  // Messages before the anchor (composite cursor, DESC then reverse)
+  const beforeRows = db
+    .select()
+    .from(messages)
+    .where(
+      and(
+        eq(messages.channelId, channelId),
+        sql`(${messages.createdAt}, ${messages.id}) < (${anchor.createdAt}, ${anchor.id})`
+      )
+    )
+    .orderBy(desc(messages.createdAt))
+    .limit(half)
+    .all()
+    .reverse();
+
+  // Messages after the anchor (composite cursor, ASC)
+  const afterRows = db
+    .select()
+    .from(messages)
+    .where(
+      and(
+        eq(messages.channelId, channelId),
+        sql`(${messages.createdAt}, ${messages.id}) > (${anchor.createdAt}, ${anchor.id})`
+      )
+    )
+    .orderBy(asc(messages.createdAt))
+    .limit(half)
+    .all();
+
+  // Combine: before + anchor + after (chronological order)
+  const allRows = [...beforeRows, anchor, ...afterRows];
+
+  return {
+    messages: hydrateMessages(allRows),
+    hasMoreBefore: beforeRows.length === half,
+    hasMoreAfter: afterRows.length === half,
+  };
 }
 
 /**
@@ -800,4 +962,56 @@ export function setAgentStatus(agentId: string, status: AgentStatusValue): void 
       .values({ agentId, status, updatedAt: now })
       .run();
   }
+}
+
+// ============================================================================
+// Recent Searches
+// ============================================================================
+
+const MAX_RECENT_SEARCHES = 15;
+
+export function getRecentSearches(): string[] {
+  const db = getDb();
+  const rows = db
+    .select({ query: recentSearches.query })
+    .from(recentSearches)
+    .orderBy(desc(recentSearches.createdAt))
+    .limit(MAX_RECENT_SEARCHES)
+    .all();
+  return rows.map((r) => r.query);
+}
+
+export function addRecentSearch(query: string): void {
+  const db = getDb();
+  const trimmed = query.trim();
+  if (!trimmed) return;
+
+  // Remove duplicate if it already exists
+  db.delete(recentSearches)
+    .where(eq(recentSearches.query, trimmed))
+    .run();
+
+  // Insert as most recent
+  db.insert(recentSearches)
+    .values({ query: trimmed, createdAt: Date.now() })
+    .run();
+
+  // Prune old entries beyond the limit
+  const all = db
+    .select({ id: recentSearches.id })
+    .from(recentSearches)
+    .orderBy(desc(recentSearches.createdAt))
+    .all();
+
+  if (all.length > MAX_RECENT_SEARCHES) {
+    const toDelete = all.slice(MAX_RECENT_SEARCHES).map((r) => r.id);
+    db.delete(recentSearches)
+      .where(inArray(recentSearches.id, toDelete))
+      .run();
+  }
+}
+
+export function clearRecentSearches(): void {
+  const db = getDb();
+  db.delete(recentSearches).run();
 }
