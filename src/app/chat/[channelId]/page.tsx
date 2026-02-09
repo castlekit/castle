@@ -29,6 +29,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
   const [channelName, setChannelName] = useState<string | null>(null);
   const [channelAgentIds, setChannelAgentIds] = useState<string[]>([]);
   const [channelCreatedAt, setChannelCreatedAt] = useState<number | null>(null);
+  const [channelArchived, setChannelArchived] = useState(false);
   const { displayName, avatarUrl: userAvatar } = useUserSettings();
 
   // Mark this channel as last accessed and fetch channel info
@@ -40,7 +41,8 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
       body: JSON.stringify({ action: "touch", id: channelId }),
     }).catch(() => {});
 
-    // Fetch channel details for the name and agents
+    // Fetch channel details for the name and agents.
+    // Try active channels first, then archived if not found.
     fetch("/api/openclaw/chat/channels")
       .then((r) => r.json())
       .then((data) => {
@@ -52,6 +54,23 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
           setChannelName(ch.name);
           setChannelAgentIds(ch.agents || []);
           setChannelCreatedAt(ch.createdAt ?? null);
+          setChannelArchived(false);
+        } else {
+          // Channel not in active list — check archived channels
+          return fetch("/api/openclaw/chat/channels?archived=1")
+            .then((r) => r.json())
+            .then((archived) => {
+              const archivedCh = (archived.channels || []).find(
+                (c: { id: string; name: string; agents?: string[] }) =>
+                  c.id === channelId
+              );
+              if (archivedCh) {
+                setChannelName(archivedCh.name);
+                setChannelAgentIds(archivedCh.agents || []);
+                setChannelCreatedAt(archivedCh.createdAt ?? null);
+                setChannelArchived(true);
+              }
+            });
         }
       })
       .catch(() => {});
@@ -73,6 +92,9 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
     hasMore,
     loadMore,
     loadingMore,
+    hasMoreAfter,
+    loadNewer,
+    loadingNewer,
     streamingMessages,
     isStreaming,
     currentSessionKey,
@@ -81,7 +103,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
     sending,
     sendError,
     clearSendError,
-  } = useChat({ channelId, defaultAgentId });
+  } = useChat({ channelId, defaultAgentId, anchorMessageId: highlightMessageId });
 
   const { stats, isLoading: statsLoading } = useSessionStats({
     sessionKey: currentSessionKey,
@@ -98,6 +120,9 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
         <div>
           <h2 className="text-lg font-semibold text-foreground">
             {channelName || ""}
+            {channelArchived && (
+              <span className="ml-2 text-sm font-normal text-foreground-secondary">(Archived)</span>
+            )}
           </h2>
           {(displayName || channelAgentIds.length > 0) && agents.length > 0 && (
             <p className="text-sm text-foreground-secondary mt-0.5">
@@ -140,6 +165,9 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
         userAvatar={userAvatar}
         streamingMessages={streamingMessages}
         onLoadMore={loadMore}
+        hasMoreAfter={hasMoreAfter}
+        onLoadNewer={loadNewer}
+        loadingNewer={loadingNewer}
         channelId={channelId}
         channelName={channelName}
         channelCreatedAt={channelCreatedAt}

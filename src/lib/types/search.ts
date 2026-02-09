@@ -39,6 +39,7 @@ export interface MessageSearchResult extends SearchResultBase {
   messageId: string;
   senderType: "user" | "agent";
   senderName: string;
+  archived?: boolean;
 }
 
 // Future examples (not implemented in v1):

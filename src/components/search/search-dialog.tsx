@@ -29,6 +29,9 @@ function MessageResultRow({ result }: { result: MessageSearchResult }) {
           <span className="px-1.5 py-0.5 rounded bg-accent/10 text-accent font-medium text-[11px]">
             {result.title}
           </span>
+          {result.archived && (
+            <span className="text-[11px] text-foreground-secondary/50 italic">archived</span>
+          )}
           <span className="font-medium">{result.subtitle}</span>
           <span className="text-foreground-secondary/60">{timeStr}</span>
         </div>

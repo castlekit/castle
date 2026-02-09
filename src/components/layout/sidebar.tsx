@@ -93,6 +93,27 @@ function Sidebar({
 
       {/* Navigation */}
       <nav className="flex-1 space-y-1 px-2">
+        {/* Search — first item */}
+        {showTooltips ? (
+          <Tooltip content="Search (⌘K)" side="right">
+            <button
+              onClick={openSearch}
+              className="flex items-center justify-center w-full rounded-[4px] p-2.5 cursor-pointer text-foreground-secondary hover:text-foreground hover:bg-surface-hover"
+            >
+              <Search className="h-5 w-5 shrink-0" strokeWidth={2.5} />
+            </button>
+          </Tooltip>
+        ) : (
+          <div>
+            <button
+              onClick={openSearch}
+              className="flex items-center justify-center w-full rounded-[4px] p-2.5 cursor-pointer text-foreground-secondary hover:text-foreground hover:bg-surface-hover"
+            >
+              <Search className="h-5 w-5 shrink-0" strokeWidth={2.5} />
+            </button>
+          </div>
+        )}
+
         {navItems.map((item) => {
           const isActive = effectiveActive === item.id;
           const NavEl = (
@@ -119,27 +140,6 @@ function Sidebar({
           return <div key={item.id}>{NavEl}</div>;
         })}
       </nav>
-
-      {/* Search button */}
-      <div className="px-2 mb-auto">
-        {showTooltips ? (
-          <Tooltip content="Search (⌘K)" side="right">
-            <button
-              onClick={openSearch}
-              className="flex items-center justify-center w-full rounded-[4px] p-2.5 cursor-pointer text-foreground-secondary hover:text-foreground hover:bg-surface-hover"
-            >
-              <Search className="h-5 w-5 shrink-0" />
-            </button>
-          </Tooltip>
-        ) : (
-          <button
-            onClick={openSearch}
-            className="flex items-center justify-center w-full rounded-[4px] p-2.5 cursor-pointer text-foreground-secondary hover:text-foreground hover:bg-surface-hover"
-          >
-            <Search className="h-5 w-5 shrink-0" />
-          </button>
-        )}
-      </div>
 
       {/* User menu at bottom */}
       <SidebarUserMenu />
@@ -175,7 +175,7 @@ function SidebarUserMenu() {
   const isDark = theme === "dark";
 
   return (
-    <div ref={menuRef} className="relative flex justify-center pb-[10px]">
+    <div ref={menuRef} className="relative flex justify-center pb-[8px]">
       <button
         onClick={() => setOpen(!open)}
         className="group flex items-center justify-center rounded-[4px] cursor-pointer overflow-hidden transition-opacity"

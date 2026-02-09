@@ -65,6 +65,12 @@ interface MessageListProps {
   userAvatar?: string | null;
   streamingMessages?: Map<string, StreamingMessage>;
   onLoadMore?: () => void;
+  /** Whether there are newer messages to load (anchor mode) */
+  hasMoreAfter?: boolean;
+  /** Callback to load newer messages (anchor mode) */
+  onLoadNewer?: () => void;
+  /** Whether newer messages are currently loading */
+  loadingNewer?: boolean;
   channelId?: string;
   channelName?: string | null;
   channelCreatedAt?: number | null;
@@ -81,6 +87,9 @@ export function MessageList({
   userAvatar,
   streamingMessages,
   onLoadMore,
+  hasMoreAfter,
+  onLoadNewer,
+  loadingNewer,
   channelId,
   channelName,
   channelCreatedAt,
@@ -114,32 +123,13 @@ export function MessageList({
     }
   }, [messages, agentStatuses, channelId]);
 
-  // Scroll to highlighted message when it appears in the DOM.
-  // The message stays highlighted as long as ?m= is in the URL.
-  const highlightHandled = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!highlightMessageId || highlightMessageId === highlightHandled.current) return;
-    if (messages.length === 0) return;
-
-    const el = document.getElementById(`msg-${highlightMessageId}`);
-    if (el) {
-      highlightHandled.current = highlightMessageId;
-      requestAnimationFrame(() => {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-      });
-    } else if (hasMore && onLoadMore) {
-      // Message not in loaded set — load more
-      onLoadMore();
-    }
-  }, [highlightMessageId, messages, hasMore, onLoadMore]);
-
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const isInitialLoad = useRef(true);
   const pinnedToBottom = useRef(true);
   const isLoadingOlder = useRef(false);
+  const highlightHandled = useRef<string | null>(null);
 
   // Scroll helper
   const scrollToBottom = useCallback(() => {
@@ -176,47 +166,76 @@ export function MessageList({
     return () => observer.disconnect();
   }, [scrollToBottom]);
 
-  // Initial scroll before paint
+  // Initial scroll before paint — skip if we have a highlight target
   useLayoutEffect(() => {
     if (isInitialLoad.current && messages.length > 0) {
-      pinnedToBottom.current = true;
-      scrollToBottom();
-      requestAnimationFrame(scrollToBottom);
+      if (!highlightMessageId) {
+        pinnedToBottom.current = true;
+        scrollToBottom();
+        requestAnimationFrame(scrollToBottom);
+      }
       isInitialLoad.current = false;
     }
-  }, [messages.length, scrollToBottom]);
+  }, [messages.length, scrollToBottom, highlightMessageId]);
 
   // Re-pin to bottom when new messages arrive or streaming changes,
-  // but NOT when loading older messages via infinite scroll.
+  // but NOT when loading older messages via infinite scroll,
+  // and NOT when a highlight target is active.
   useLayoutEffect(() => {
     if (!isInitialLoad.current) {
       if (isLoadingOlder.current) {
         isLoadingOlder.current = false;
+      } else if (highlightMessageId) {
+        // Don't auto-pin while a highlight target is active —
+        // let the highlight scroll and user scrolling manage pinning.
       } else {
         pinnedToBottom.current = true;
       }
     }
-  }, [messages, streamingMessages]);
+  }, [messages, streamingMessages, highlightMessageId]);
 
   // EVERY render: if pinned, scroll to bottom BEFORE paint.
-  // This catches container resizes (e.g. input box shrinks when cleared)
-  // that would otherwise cause a one-frame content shift.
   useLayoutEffect(() => {
     if (pinnedToBottom.current) {
       scrollToBottom();
     }
   });
 
-  // Infinite scroll up for loading older messages + track pinned state
+  // Scroll to highlighted message — MUST be the LAST useLayoutEffect so it
+  // runs after all the pinning/scrolling effects above and gets the final say.
+  useLayoutEffect(() => {
+    if (!highlightMessageId) return;
+    if (highlightMessageId === highlightHandled.current) return;
+    if (messages.length === 0) return;
+
+    const el = document.getElementById(`msg-${highlightMessageId}`);
+    if (el) {
+      highlightHandled.current = highlightMessageId;
+      pinnedToBottom.current = false;
+      el.scrollIntoView({ behavior: "instant", block: "center" });
+    }
+  }, [highlightMessageId, messages]);
+
+  // Infinite scroll: up for older messages, down for newer messages
   const handleScroll = useCallback(() => {
     checkIfPinned();
-    if (!scrollContainerRef.current || !hasMore || loadingMore || !onLoadMore) return;
-    const { scrollTop } = scrollContainerRef.current;
-    if (scrollTop < 100) {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const { scrollTop, scrollHeight, clientHeight } = container;
+
+    // Load older messages when scrolling near the top
+    if (scrollTop < 100 && hasMore && !loadingMore && onLoadMore) {
       isLoadingOlder.current = true;
       onLoadMore();
     }
-  }, [hasMore, loadingMore, onLoadMore, checkIfPinned]);
+
+    // Load newer messages when scrolling near the bottom (anchor mode)
+    const scrollBottom = scrollHeight - scrollTop - clientHeight;
+    if (scrollBottom < 100 && hasMoreAfter && !loadingNewer && onLoadNewer) {
+      onLoadNewer();
+    }
+  }, [hasMore, loadingMore, onLoadMore, hasMoreAfter, loadingNewer, onLoadNewer, checkIfPinned]);
 
   const getAgentName = (agentId: string) => {
     const agent = agents.find((a) => a.id === agentId);
@@ -405,6 +424,24 @@ export function MessageList({
             </div>
           );
         })}
+
+        {/* Loading newer messages indicator (anchor mode) */}
+        {loadingNewer && (
+          <div className="flex justify-center py-2">
+            <Loader2 className="h-4 w-4 animate-spin text-foreground-secondary" />
+          </div>
+        )}
+
+        {hasMoreAfter && !loadingNewer && (
+          <div className="flex justify-center py-2">
+            <button
+              onClick={onLoadNewer}
+              className="text-xs text-foreground-secondary hover:text-foreground transition-colors"
+            >
+              Load newer messages
+            </button>
+          </div>
+        )}
 
         {/* Typing indicator — shows dots until the final message is persisted */}
         {streamingMessages &&

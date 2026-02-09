@@ -26,11 +26,16 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Build channel name lookup (single query, cached per request)
-    const channelList = getChannels();
-    const channelMap = new Map<string, string>();
-    for (const ch of channelList) {
-      channelMap.set(ch.id, ch.name);
+    // Build channel name lookup — include archived channels so their
+    // names still resolve in search results.
+    const activeChannels = getChannels(false);
+    const archivedChannels = getChannels(true);
+    const channelMap = new Map<string, { name: string; archived: boolean }>();
+    for (const ch of activeChannels) {
+      channelMap.set(ch.id, { name: ch.name, archived: false });
+    }
+    for (const ch of archivedChannels) {
+      channelMap.set(ch.id, { name: ch.name, archived: true });
     }
 
     // Search messages across all channels
@@ -38,7 +43,9 @@ export async function GET(request: NextRequest) {
 
     // Map raw ChatMessage[] into typed MessageSearchResult[]
     const results: SearchResult[] = rawMessages.map((msg): MessageSearchResult => {
-      const channelName = channelMap.get(msg.channelId) || "Unknown";
+      const ch = channelMap.get(msg.channelId);
+      const channelName = ch?.name || "Unknown";
+      const archived = ch?.archived ?? false;
       const senderName =
         msg.senderType === "user"
           ? "You"
@@ -63,6 +70,7 @@ export async function GET(request: NextRequest) {
         messageId: msg.id,
         senderType: msg.senderType,
         senderName,
+        archived,
       };
     });
 

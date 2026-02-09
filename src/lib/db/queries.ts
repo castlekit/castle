@@ -1,4 +1,4 @@
-import { eq, desc, and, lt, sql, inArray } from "drizzle-orm";
+import { eq, desc, asc, and, lt, gt, sql, inArray } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { getDb } from "./index";
 import {
@@ -261,56 +261,13 @@ export function deleteMessage(id: string): boolean {
 }
 
 /**
- * Get messages for a channel with cursor-based pagination.
- * @param channelId - Channel to load messages for
- * @param limit - Max messages to return (default 50)
- * @param before - Message ID cursor — returns messages older than this
+ * Hydrate raw message rows with attachments and reactions.
+ * Shared by getMessagesByChannel, getMessagesAfter, and getMessagesAround.
  */
-export function getMessagesByChannel(
-  channelId: string,
-  limit = 50,
-  before?: string
-): ChatMessage[] {
+function hydrateMessages(rows: typeof messages.$inferSelect[]): ChatMessage[] {
   const db = getDb();
-
-  let query;
-  if (before) {
-    // Get the createdAt of the cursor message
-    const cursor = db
-      .select({ createdAt: messages.createdAt })
-      .from(messages)
-      .where(eq(messages.id, before))
-      .get();
-
-    if (!cursor) return [];
-
-    query = db
-      .select()
-      .from(messages)
-      .where(
-        and(
-          eq(messages.channelId, channelId),
-          lt(messages.createdAt, cursor.createdAt)
-        )
-      )
-      .orderBy(desc(messages.createdAt))
-      .limit(limit)
-      .all();
-  } else {
-    query = db
-      .select()
-      .from(messages)
-      .where(eq(messages.channelId, channelId))
-      .orderBy(desc(messages.createdAt))
-      .limit(limit)
-      .all();
-  }
-
-  // Reverse to chronological order
-  const rows = query.reverse();
-
-  // Batch-load attachments and reactions
   const messageIds = rows.map((r) => r.id);
+
   const attachmentRows = messageIds.length > 0
     ? db.select().from(messageAttachments).where(inArray(messageAttachments.messageId, messageIds)).all()
     : [];
@@ -366,6 +323,151 @@ export function getMessagesByChannel(
     attachments: attachmentsByMsg.get(row.id) || [],
     reactions: reactionsByMsg.get(row.id) || [],
   }));
+}
+
+/**
+ * Get messages for a channel with cursor-based pagination.
+ * @param channelId - Channel to load messages for
+ * @param limit - Max messages to return (default 50)
+ * @param before - Message ID cursor — returns messages older than this
+ */
+export function getMessagesByChannel(
+  channelId: string,
+  limit = 50,
+  before?: string
+): ChatMessage[] {
+  const db = getDb();
+
+  let query;
+  if (before) {
+    const cursor = db
+      .select({ createdAt: messages.createdAt })
+      .from(messages)
+      .where(eq(messages.id, before))
+      .get();
+
+    if (!cursor) return [];
+
+    query = db
+      .select()
+      .from(messages)
+      .where(
+        and(
+          eq(messages.channelId, channelId),
+          lt(messages.createdAt, cursor.createdAt)
+        )
+      )
+      .orderBy(desc(messages.createdAt))
+      .limit(limit)
+      .all();
+  } else {
+    query = db
+      .select()
+      .from(messages)
+      .where(eq(messages.channelId, channelId))
+      .orderBy(desc(messages.createdAt))
+      .limit(limit)
+      .all();
+  }
+
+  // Reverse to chronological order
+  return hydrateMessages(query.reverse());
+}
+
+/**
+ * Get messages for a channel AFTER a cursor (forward pagination).
+ * Returns messages newer than the cursor, in chronological order.
+ */
+export function getMessagesAfter(
+  channelId: string,
+  afterId: string,
+  limit = 50
+): ChatMessage[] {
+  const db = getDb();
+
+  const cursor = db
+    .select({ createdAt: messages.createdAt })
+    .from(messages)
+    .where(eq(messages.id, afterId))
+    .get();
+
+  if (!cursor) return [];
+
+  const rows = db
+    .select()
+    .from(messages)
+    .where(
+      and(
+        eq(messages.channelId, channelId),
+        gt(messages.createdAt, cursor.createdAt)
+      )
+    )
+    .orderBy(asc(messages.createdAt))
+    .limit(limit)
+    .all();
+
+  return hydrateMessages(rows);
+}
+
+/**
+ * Get a window of messages around an anchor message.
+ * Returns ~limit messages centered on the anchor, plus hasMoreBefore/hasMoreAfter flags.
+ */
+export function getMessagesAround(
+  channelId: string,
+  anchorMessageId: string,
+  limit = 50
+): { messages: ChatMessage[]; hasMoreBefore: boolean; hasMoreAfter: boolean } | null {
+  const db = getDb();
+
+  // Look up the anchor message
+  const anchor = db
+    .select()
+    .from(messages)
+    .where(and(eq(messages.id, anchorMessageId), eq(messages.channelId, channelId)))
+    .get();
+
+  if (!anchor) return null;
+
+  const half = Math.floor(limit / 2);
+
+  // Messages before the anchor (DESC then reverse)
+  const beforeRows = db
+    .select()
+    .from(messages)
+    .where(
+      and(
+        eq(messages.channelId, channelId),
+        lt(messages.createdAt, anchor.createdAt)
+      )
+    )
+    .orderBy(desc(messages.createdAt))
+    .limit(half)
+    .all()
+    .reverse();
+
+  // Messages after the anchor (ASC)
+  const afterRows = db
+    .select()
+    .from(messages)
+    .where(
+      and(
+        eq(messages.channelId, channelId),
+        gt(messages.createdAt, anchor.createdAt)
+      )
+    )
+    .orderBy(asc(messages.createdAt))
+    .limit(half)
+    .all();
+
+  // Combine: before + anchor + after (chronological order)
+  const allRows = [...beforeRows, anchor, ...afterRows];
+
+  return {
+    messages: hydrateMessages(allRows),
+    hasMoreBefore: beforeRows.length === half,
+    hasMoreAfter: afterRows.length === half,
+  };
 }
 
 /**
