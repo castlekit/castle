@@ -65,23 +65,31 @@ export function getChannels(includeArchived = false): Channel[] {
     : db.select().from(channels).where(sql`${channels.archivedAt} IS NULL`).orderBy(desc(channels.createdAt));
 
   const rows = query.all();
+  if (rows.length === 0) return [];
 
-  return rows.map((row) => {
-    const agentRows = db
-      .select()
-      .from(channelAgents)
-      .where(eq(channelAgents.channelId, row.id))
-      .all();
+  // Batch-load all channel agents in one query (avoids N+1)
+  const channelIds = rows.map((r) => r.id);
+  const allAgentRows = db
+    .select()
+    .from(channelAgents)
+    .where(inArray(channelAgents.channelId, channelIds))
+    .all();
 
-    return {
-      id: row.id,
-      name: row.name,
-      defaultAgentId: row.defaultAgentId,
-      agents: agentRows.map((a) => a.agentId),
-      createdAt: row.createdAt,
-      archivedAt: row.archivedAt ?? null,
-    };
-  });
+  const agentsByChannel = new Map<string, string[]>();
+  for (const a of allAgentRows) {
+    const list = agentsByChannel.get(a.channelId) || [];
+    list.push(a.agentId);
+    agentsByChannel.set(a.channelId, list);
+  }
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    defaultAgentId: row.defaultAgentId,
+    agents: agentsByChannel.get(row.id) || [],
+    createdAt: row.createdAt,
+    archivedAt: row.archivedAt ?? null,
+  }));
 }
 
 export function getChannel(id: string): Channel | null {
@@ -341,20 +349,21 @@ export function getMessagesByChannel(
   let query;
   if (before) {
     const cursor = db
-      .select({ createdAt: messages.createdAt })
+      .select({ createdAt: messages.createdAt, id: messages.id })
       .from(messages)
       .where(eq(messages.id, before))
       .get();
 
     if (!cursor) return [];
 
+    // Composite cursor (createdAt, id) to avoid skipping messages with identical timestamps
     query = db
       .select()
       .from(messages)
       .where(
         and(
           eq(messages.channelId, channelId),
-          lt(messages.createdAt, cursor.createdAt)
+          sql`(${messages.createdAt}, ${messages.id}) < (${cursor.createdAt}, ${cursor.id})`
         )
       )
       .orderBy(desc(messages.createdAt))
@@ -386,20 +395,21 @@ export function getMessagesAfter(
   const db = getDb();
 
   const cursor = db
-    .select({ createdAt: messages.createdAt })
+    .select({ createdAt: messages.createdAt, id: messages.id })
     .from(messages)
     .where(eq(messages.id, afterId))
     .get();
 
   if (!cursor) return [];
 
+  // Composite cursor (createdAt, id) to avoid skipping messages with identical timestamps
   const rows = db
     .select()
     .from(messages)
     .where(
       and(
         eq(messages.channelId, channelId),
-        gt(messages.createdAt, cursor.createdAt)
+        sql`(${messages.createdAt}, ${messages.id}) > (${cursor.createdAt}, ${cursor.id})`
       )
     )
     .orderBy(asc(messages.createdAt))
@@ -431,14 +441,14 @@ export function getMessagesAround(
 
   const half = Math.floor(limit / 2);
 
-  // Messages before the anchor (DESC then reverse)
+  // Messages before the anchor (composite cursor, DESC then reverse)
   const beforeRows = db
     .select()
     .from(messages)
     .where(
       and(
         eq(messages.channelId, channelId),
-        lt(messages.createdAt, anchor.createdAt)
+        sql`(${messages.createdAt}, ${messages.id}) < (${anchor.createdAt}, ${anchor.id})`
       )
     )
     .orderBy(desc(messages.createdAt))
@@ -446,14 +456,14 @@ export function getMessagesAround(
     .all()
     .reverse();
 
-  // Messages after the anchor (ASC)
+  // Messages after the anchor (composite cursor, ASC)
   const afterRows = db
     .select()
     .from(messages)
     .where(
       and(
         eq(messages.channelId, channelId),
-        gt(messages.createdAt, anchor.createdAt)
+        sql`(${messages.createdAt}, ${messages.id}) > (${anchor.createdAt}, ${anchor.id})`
       )
     )
     .orderBy(asc(messages.createdAt))

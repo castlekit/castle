@@ -30,6 +30,10 @@ function Tooltip({
 
   useEffect(() => {
     setMounted(true);
+    return () => {
+      // Clean up delay timer on unmount to prevent setState on unmounted component
+      if (delayRef.current) clearTimeout(delayRef.current);
+    };
   }, []);
 
   const updatePosition = useCallback(() => {

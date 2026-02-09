@@ -20,6 +20,8 @@ interface ChannelPageProps {
 
 // Module-level flag: once any channel has rendered real content, subsequent
 // channel switches use a smooth opacity transition instead of the skeleton.
+// NOTE: This persists for the entire browser session and never resets.
+// If Castle ever supports logout or multi-user, this will need a reset mechanism.
 let hasEverRendered = false;
 
 // ---------------------------------------------------------------------------
@@ -113,6 +115,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
 
     // Fetch channel details for the name and agents.
     // Try active channels first, then archived if not found.
+    // Falls back to channelId as name if both fail (prevents stuck loading).
     fetch("/api/openclaw/chat/channels")
       .then((r) => r.json())
       .then((data) => {
@@ -139,11 +142,17 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
                 setChannelAgentIds(archivedCh.agents || []);
                 setChannelCreatedAt(archivedCh.createdAt ?? null);
                 setChannelArchived(true);
+              } else {
+                // Channel not found anywhere — use ID as fallback name
+                setChannelName("Chat");
               }
             });
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        // Network error — fall back so page doesn't stay stuck
+        setChannelName("Chat");
+      });
   }, [channelId]);
 
   // Map agents to the AgentInfo format used by chat components

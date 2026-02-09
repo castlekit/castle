@@ -164,6 +164,10 @@ function orphanEventSource(
 // Hook
 // ============================================================================
 
+/** Max messages to keep in the SWR cache. When exceeded, evict from the
+ *  opposite end to prevent unbounded memory growth during long scroll sessions. */
+const MAX_CACHED_MESSAGES = 500;
+
 interface UseChatOptions {
   channelId: string;
   defaultAgentId?: string;
@@ -294,15 +298,22 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
         const olderMessages: ChatMessage[] = data.messages ?? [];
         if (olderMessages.length > 0) {
           // Prepend older messages to the SWR cache (dedup on merge)
+          // Evict from the newer end if cache exceeds MAX_CACHED_MESSAGES
           mutateHistory(
             (current: HistoryData | undefined) => {
               const existing = current?.messages ?? [];
               const existingIds = new Set(existing.map((m) => m.id));
               const unique = olderMessages.filter((m: ChatMessage) => !existingIds.has(m.id));
+              let merged = [...unique, ...existing];
+              let hasMoreAfter = current?.hasMoreAfter ?? false;
+              if (merged.length > MAX_CACHED_MESSAGES) {
+                merged = merged.slice(0, MAX_CACHED_MESSAGES);
+                hasMoreAfter = true;
+              }
               return {
-                messages: [...unique, ...existing],
+                messages: merged,
                 hasMoreBefore: data.hasMore,
-                hasMoreAfter: current?.hasMoreAfter ?? false,
+                hasMoreAfter,
               };
             },
             { revalidate: false }
@@ -333,14 +344,21 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
         const newerMessages: ChatMessage[] = data.messages ?? [];
         if (newerMessages.length > 0) {
           // Append newer messages to the SWR cache (dedup on merge)
+          // Evict from the older end if cache exceeds MAX_CACHED_MESSAGES
           mutateHistory(
             (current: HistoryData | undefined) => {
               const existing = current?.messages ?? [];
               const existingIds = new Set(existing.map((m) => m.id));
               const unique = newerMessages.filter((m: ChatMessage) => !existingIds.has(m.id));
+              let merged = [...existing, ...unique];
+              let hasMoreBefore = current?.hasMoreBefore ?? false;
+              if (merged.length > MAX_CACHED_MESSAGES) {
+                merged = merged.slice(merged.length - MAX_CACHED_MESSAGES);
+                hasMoreBefore = true;
+              }
               return {
-                messages: [...existing, ...unique],
-                hasMoreBefore: current?.hasMoreBefore ?? false,
+                messages: merged,
+                hasMoreBefore,
                 hasMoreAfter: data.hasMore,
               };
             },

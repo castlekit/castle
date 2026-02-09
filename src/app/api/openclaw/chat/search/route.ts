@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sanitizeForApi } from "@/lib/api-security";
+import { sanitizeForApi, checkRateLimit, rateLimitKey } from "@/lib/api-security";
 import { searchMessages, getChannels } from "@/lib/db/queries";
 import type { MessageSearchResult, SearchResult } from "@/lib/types/search";
 
@@ -10,6 +10,10 @@ const MAX_QUERY_LENGTH = 500;
 // ============================================================================
 
 export async function GET(request: NextRequest) {
+  // Rate limit: 60 searches per minute
+  const rl = checkRateLimit(rateLimitKey(request, "chat:search"), 60);
+  if (rl) return rl;
+
   const { searchParams } = new URL(request.url);
   const q = searchParams.get("q");
   const limit = Math.min(parseInt(searchParams.get("limit") || "30", 10), 100);

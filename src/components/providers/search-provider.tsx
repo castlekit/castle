@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { usePathname } from "next/navigation";
 import { Search } from "lucide-react";
 import { SearchDialog } from "@/components/search/search-dialog";
 
@@ -30,6 +31,10 @@ export function useSearchContext() {
 
 export function SearchProvider({ children }: { children: React.ReactNode }) {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const pathname = usePathname();
+
+  // Hide the floating search trigger on pages where it would overlap or isn't relevant
+  const showSearchBar = pathname !== "/settings" && pathname !== "/ui-kit";
 
   const openSearch = useCallback(() => setIsSearchOpen(true), []);
   const closeSearch = useCallback(() => setIsSearchOpen(false), []);
@@ -59,15 +64,17 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
   return (
     <SearchContext.Provider value={{ isSearchOpen, openSearch, closeSearch }}>
       {children}
-      {/* Floating search trigger — top right */}
-      <button
-        onClick={openSearch}
-        className="fixed top-[28px] right-[28px] z-50 flex items-center gap-3 pl-3 pr-2.5 h-[38px] w-[320px] rounded-[var(--radius-sm)] bg-surface border border-border hover:border-border-hover text-foreground-secondary hover:text-foreground transition-colors cursor-pointer shadow-sm"
-      >
-        <Search className="h-4 w-4 shrink-0" strokeWidth={2.5} />
-        <span className="text-sm text-foreground-secondary/50 flex-1 text-left">Search Castle...</span>
-        <kbd className="flex items-center justify-center h-[22px] min-w-[22px] px-1 rounded-[4px] bg-surface-hover border border-border text-[11px] font-medium text-foreground-secondary">/</kbd>
-      </button>
+      {/* Floating search trigger — top right (hidden on settings/ui-kit) */}
+      {showSearchBar && (
+        <button
+          onClick={openSearch}
+          className="fixed top-[28px] right-[28px] z-50 flex items-center gap-3 pl-3 pr-2.5 h-[38px] w-[320px] rounded-[var(--radius-sm)] bg-surface border border-border hover:border-border-hover text-foreground-secondary hover:text-foreground transition-colors cursor-pointer shadow-sm"
+        >
+          <Search className="h-4 w-4 shrink-0" strokeWidth={2.5} />
+          <span className="text-sm text-foreground-secondary/50 flex-1 text-left">Search Castle...</span>
+          <kbd className="flex items-center justify-center h-[22px] min-w-[22px] px-1 rounded-[4px] bg-surface-hover border border-border text-[11px] font-medium text-foreground-secondary">/</kbd>
+        </button>
+      )}
       <SearchDialog open={isSearchOpen} onClose={closeSearch} />
     </SearchContext.Provider>
   );
