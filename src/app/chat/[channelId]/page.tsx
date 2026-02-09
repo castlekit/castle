@@ -194,7 +194,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
   return (
     <div className={cn("flex-1 flex flex-col h-full overflow-hidden transition-opacity duration-150", channelReady ? "opacity-100" : "opacity-0")}>
       {/* Channel header — sticky */}
-      <div className="py-4 border-b border-border flex items-center justify-between shrink-0 min-h-[83px]">
+      <div className="pb-4 border-b border-border flex items-center justify-between shrink-0 min-h-[83px]">
         <div>
           <h2 className="text-lg font-semibold text-foreground">
             {channelName}
