@@ -5,8 +5,8 @@ export default defineConfig({
   test: {
     globals: true,
     environment: "node",
-    include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
-    exclude: ["src/__tests__/stress/**"],
+    include: ["src/__tests__/stress/**/*.test.ts"],
+    testTimeout: 60000, // 60s per test — stress tests are slow
     alias: {
       "@": resolve(__dirname, "src"),
     },

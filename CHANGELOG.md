@@ -2,6 +2,15 @@
 
 All notable changes to Castle are documented here.
 
+## 0.3.2 (2026-02-09)
+
+### Added
+
+- Stress test suite (`npm run stress`) — 19 tests covering database under load, API route concurrency, and connection resilience
+  - DB: concurrent inserts, FTS5 search/corruption/repair, 5000-message pagination, cascade deletes, WAL pressure
+  - API: rate limiter accuracy, message size boundaries, concurrent search/channel ops, PUT idempotency
+  - Connections: SSE subscriber storms, event deduplication, WebSocket reconnection, pending request cleanup
+
 ## 0.3.1 (2026-02-09)
 
 ### Added
