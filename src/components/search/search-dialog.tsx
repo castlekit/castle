@@ -78,7 +78,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
   // Reset selection when results change
   useEffect(() => {
     setSelectedIndex(-1);
-  }, [results, query]);
+  }, [results]);
 
   // Determine what items are shown (results or recent searches)
   const showRecent = !query.trim() && recentSearches.length > 0;
@@ -144,7 +144,6 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
       <div
         className="relative w-full max-w-[560px] rounded-[var(--radius-md)] bg-surface border border-border shadow-2xl overflow-hidden"
         onClick={(e) => e.stopPropagation()}
-        onKeyDown={handleKeyDown}
       >
         {/* Search input */}
         <div className="flex items-center gap-3 px-4 py-3 border-b border-border">
@@ -154,6 +153,7 @@ export function SearchDialog({ open, onClose }: SearchDialogProps) {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
             placeholder="Search across all channels..."
             className="flex-1 bg-transparent text-[15px] focus:outline-none placeholder:text-foreground-secondary/50"
           />
