@@ -4,6 +4,7 @@ import React from "react";
 import { Bot, User, AlertTriangle, StopCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
+import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownContent } from "./markdown-content";
 import { TwemojiText } from "@/components/ui/twemoji-text";
 import type { ChatMessage } from "@/lib/types/chat";
@@ -38,9 +39,19 @@ export function MessageBubble({
   userStatus,
   highlighted,
 }: MessageBubbleProps) {
-  const formattedTime = new Date(message.createdAt).toLocaleTimeString([], {
+  const messageDate = new Date(message.createdAt);
+  const formattedTime = messageDate.toLocaleTimeString([], {
     hour: "numeric",
     minute: "2-digit",
+    hour12: true,
+  });
+  const fullDateTime = messageDate.toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    second: "2-digit",
     hour12: true,
   });
 
@@ -88,9 +99,11 @@ export function MessageBubble({
             <span className="font-bold text-[15px] text-foreground">
               {displayName}
             </span>
-            <span className="text-xs text-foreground-secondary">
-              {formattedTime}
-            </span>
+            <Tooltip content={fullDateTime} side="top" delay={800}>
+              <span className="text-xs text-foreground-secondary hover:text-foreground cursor-pointer transition-colors">
+                {formattedTime}
+              </span>
+            </Tooltip>
           </div>
         )}
 
