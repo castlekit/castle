@@ -3,7 +3,7 @@ import pc from "picocolors";
 import { execSync } from "child_process";
 import { randomUUID } from "crypto";
 import WebSocket from "ws";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { resolve as resolvePath, dirname } from "path";
 import { fileURLToPath } from "url";
 import {
@@ -292,6 +292,20 @@ async function promptManualGateway(): Promise<{
 
 export async function runOnboarding(): Promise<void> {
 
+  // Node 22+ is required for native fetch, compile cache, and modern APIs
+  const nodeVersion = parseInt(process.versions.node.split(".")[0], 10);
+  if (nodeVersion < 22) {
+    p.intro(BLUE_BOLD("Castle Setup"));
+    p.log.error(
+      pc.red(`Node.js 22 or higher is required (you have v${process.versions.node}).`) +
+      "\n" +
+      pc.dim("  Install it from https://nodejs.org or via nvm:\n") +
+      BLUE("  nvm install 22 && nvm use 22")
+    );
+    p.outro(pc.dim("Then run castle setup again."));
+    return;
+  }
+
   p.intro(BLUE_BOLD("Castle Setup"));
 
   p.note(
@@ -510,7 +524,6 @@ export async function runOnboarding(): Promise<void> {
   };
 
   writeConfig(config);
-  serverSpinner.message("Building Castle...");
 
   const { spawn, exec, execSync: execSyncChild } = await import("child_process");
   const { join } = await import("path");
@@ -521,27 +534,80 @@ export async function runOnboarding(): Promise<void> {
   const logsDir = join(castleDir, "logs");
   mkDir(logsDir, { recursive: true });
 
-  // Build for production (async so the spinner can animate)
-  const buildOk = await new Promise<boolean>((resolve) => {
-    const child = exec("npm run build", {
-      cwd: PROJECT_ROOT,
-      timeout: 120000,
-    });
-    child.on("close", (code) => resolve(code === 0));
-    child.on("error", () => resolve(false));
-  });
+  // Check if the app was pre-built (npm publish ships .next/standalone/)
+  const standaloneServer = join(PROJECT_ROOT, ".next", "standalone", "server.js");
+  const hasPrebuilt = existsSync(standaloneServer);
 
-  if (!buildOk) {
-    serverSpinner.stop(pc.red("Build failed"));
-    p.outro(pc.dim(`Try running ${BLUE("npm run build")} manually in the castle directory.`));
-    return;
+  if (hasPrebuilt) {
+    serverSpinner.message("Pre-built Castle detected — skipping build...");
+  } else {
+    // Dev / git-clone install — need to build from source
+    serverSpinner.message("Building Castle...");
+
+    const buildLogPath = join(logsDir, "build.log");
+
+    const buildOk = await new Promise<boolean>((resolve) => {
+      let output = "";
+      const child = exec("npm run build", {
+        cwd: PROJECT_ROOT,
+        timeout: 180000,
+      });
+      child.stdout?.on("data", (d: string) => { output += d; });
+      child.stderr?.on("data", (d: string) => { output += d; });
+      child.on("close", (code) => {
+        // Write full output to log file
+        try { writeFile(buildLogPath, output); } catch { /* ignore */ }
+        resolve(code === 0);
+      });
+      child.on("error", (err) => {
+        try { writeFile(buildLogPath, output + "\n" + String(err)); } catch { /* ignore */ }
+        resolve(false);
+      });
+    });
+
+    if (!buildOk) {
+      serverSpinner.stop(pc.red("Build failed"));
+      // Show the last 20 lines of build output so the user can see what went wrong
+      try {
+        const log = readF(buildLogPath, "utf-8");
+        const lines = log.split("\n");
+        const tail = lines.slice(-20).join("\n");
+        p.log.error(pc.dim("Last 20 lines of build output:\n") + tail);
+      } catch { /* log unavailable */ }
+      p.outro(
+        pc.dim(`Full build log: ${BLUE(`~/.castle/logs/build.log`)}\n`) +
+        pc.dim(`Try running ${BLUE("npm run build")} manually in the castle directory.`)
+      );
+      return;
+    }
   }
 
   serverSpinner.message("Starting Castle...");
 
-  // Find node and next paths for the service
+  // Find node path and determine how to start the server
   const nodePath = process.execPath;
   const nextBin = join(PROJECT_ROOT, "node_modules", ".bin", "next");
+
+  // Use standalone server.js when pre-built (global installs), fall back to next start
+  const useStandalone = existsSync(join(PROJECT_ROOT, ".next", "standalone", "server.js"));
+  const serverScript = useStandalone
+    ? join(PROJECT_ROOT, ".next", "standalone", "server.js")
+    : null;
+
+  // Build the program args for the service and direct spawn
+  const serverArgs = serverScript
+    ? [serverScript]
+    : [nextBin, "start", "-p", String(config.server?.port || 3333)];
+
+  // Environment for standalone mode needs PORT and HOSTNAME
+  const serverEnv: Record<string, string> = {
+    NODE_ENV: "production",
+    PATH: process.env.PATH || "",
+  };
+  if (serverScript) {
+    serverEnv.PORT = String(config.server?.port || 3333);
+    serverEnv.HOSTNAME = "0.0.0.0";
+  }
 
   // Castle port from config or default
   const castlePort = String(config.server?.port || 3333);
@@ -587,6 +653,12 @@ export async function runOnboarding(): Promise<void> {
     const plistDir = join(home(), "Library", "LaunchAgents");
     mkDir(plistDir, { recursive: true });
     const plistPath = join(plistDir, "com.castlekit.castle.plist");
+    const plistArgs = [nodePath, ...serverArgs]
+      .map((a) => `        <string>${xmlEscape(a)}</string>`)
+      .join("\n");
+    const plistEnvEntries = Object.entries(serverEnv)
+      .map(([k, v]) => `        <key>${xmlEscape(k)}</key>\n        <string>${xmlEscape(v)}</string>`)
+      .join("\n");
     const plist = `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -595,11 +667,7 @@ export async function runOnboarding(): Promise<void> {
     <string>com.castlekit.castle</string>
     <key>ProgramArguments</key>
     <array>
-        <string>${xmlEscape(nodePath)}</string>
-        <string>${xmlEscape(nextBin)}</string>
-        <string>start</string>
-        <string>-p</string>
-        <string>${xmlEscape(castlePort)}</string>
+${plistArgs}
     </array>
     <key>WorkingDirectory</key>
     <string>${xmlEscape(PROJECT_ROOT)}</string>
@@ -616,10 +684,7 @@ export async function runOnboarding(): Promise<void> {
     <string>${xmlEscape(logsDir)}/server.err</string>
     <key>EnvironmentVariables</key>
     <dict>
-        <key>NODE_ENV</key>
-        <string>production</string>
-        <key>PATH</key>
-        <string>${xmlEscape(process.env.PATH || "")}</string>
+${plistEnvEntries}
     </dict>
 </dict>
 </plist>`;
@@ -636,17 +701,20 @@ export async function runOnboarding(): Promise<void> {
     const systemdDir = join(home(), ".config", "systemd", "user");
     mkDir(systemdDir, { recursive: true });
     const servicePath = join(systemdDir, "castle.service");
+    const systemdEnvLines = Object.entries(serverEnv)
+      .map(([k, v]) => `Environment=${k}=${v}`)
+      .join("\n");
+    const execStartCmd = [nodePath, ...serverArgs].join(" ");
     const service = `[Unit]
 Description=Castle - The multi-agent workspace
 After=network.target
 
 [Service]
-ExecStart=${nodePath} ${nextBin} start -p ${castlePort}
+ExecStart=${execStartCmd}
 WorkingDirectory=${PROJECT_ROOT}
 Restart=on-failure
 RestartSec=5
-Environment=NODE_ENV=production
-Environment=PATH=${process.env.PATH}
+${systemdEnvLines}
 
 [Install]
 WantedBy=default.target
@@ -664,10 +732,11 @@ WantedBy=default.target
     await fetch(`http://localhost:${castlePort}`);
   } catch {
     // Server not up yet — spawn it directly as fallback
-    const server = spawn(nodePath, [nextBin, "start", "-p", castlePort], {
+    const server = spawn(nodePath, serverArgs, {
       cwd: PROJECT_ROOT,
       stdio: ["ignore", "ignore", "ignore"],
       detached: true,
+      env: { ...process.env, ...serverEnv },
     });
     if (server.pid != null) {
       writeFile(pidFile, String(server.pid));

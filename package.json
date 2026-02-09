@@ -1,14 +1,17 @@
 {
   "name": "@castlekit/castle",
-  "version": "0.3.2",
+  "version": "0.4.0",
   "description": "The multi-agent workspace",
   "type": "module",
   "bin": {
     "castle": "./bin/castle.js"
   },
   "files": [
+    ".next/standalone/",
+    ".next/static/",
     "bin/",
     "src/",
+    "public/",
     "index.js",
     "install.sh",
     "next.config.ts",
@@ -21,6 +24,7 @@
     "!src/**/*.test.*"
   ],
   "scripts": {
+    "prepack": "next build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public 2>/dev/null || true",
     "dev": "next dev -p 3333",
     "build": "next build",
     "start": "next start -p 3333",
