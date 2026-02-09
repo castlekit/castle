@@ -29,48 +29,31 @@ jobs:
       - name: Scan for leaked secrets
         if: github.event_name == 'pull_request'
         run: |
-          # Only scan ADDED lines (not removals or context) and exclude test files
-          ADDED=$(git diff origin/main...HEAD -- . ':!package-lock.json' ':!src/**/__tests__/**' ':!src/**/*.test.*' \
-            | grep '^+' | grep -v '^+++' || true)
+          pip install detect-secrets==1.5.0
+          export PYTHONPATH=.detect-secrets-plugins
 
-          # --- Generic secret patterns ---
-          PATTERNS=(
-            'sk-[A-Za-z0-9]{20,}'
-            'sk_live_[A-Za-z0-9]+'
-            'sk_test_[A-Za-z0-9]+'
-            'AKIA[0-9A-Z]{16}'
-            'ghp_[A-Za-z0-9]{36}'
-            'gho_[A-Za-z0-9]{36}'
-            'github_pat_[A-Za-z0-9_]{80,}'
-            'xox[bprs]-[A-Za-z0-9\-]+'
-            'eyJ[A-Za-z0-9_-]{30,}\.[A-Za-z0-9_-]{30,}'
-            '-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'
-          )
+          # Fresh scan → compare against committed baseline
+          detect-secrets scan \
+            --exclude-files '(^|/)(package-lock\.json$|dist/|\.next/|node_modules/|\.detect-secrets\.cfg$|\.secrets\.baseline$)' \
+            > /tmp/new-baseline.json
 
-          # --- OpenClaw / Castle specific ---
-          # rew_ tokens — real ones are 32+ hex chars; short test values are fine
-          PATTERNS+=( 'rew_[a-f0-9]{32,}' )
-          # Hardcoded env var values (not ${VAR} references)
-          PATTERNS+=( 'OPENCLAW_GATEWAY_TOKEN\s*=\s*[^$\s"].{8,}' )
-          # Remote WebSocket URLs (exclude localhost 127.0.0.1)
-          PATTERNS+=( 'wss?://(?!127\.0\.0\.1)[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' )
-
-          FOUND=0
-          for PATTERN in "${PATTERNS[@]}"; do
-            MATCHES=$(echo "$ADDED" | grep -Pn "$PATTERN" || true)
-            if [ -n "$MATCHES" ]; then
-              echo "::error::Potential secret detected matching pattern: $PATTERN"
-              echo "$MATCHES" | head -5
-              FOUND=1
-            fi
-          done
-
-          if [ "$FOUND" -eq 1 ]; then
-            echo ""
-            echo "::error::Secrets detected in diff. Remove them before merging."
-            exit 1
-          fi
-          echo "No secrets detected."
+          python3 - <<'PYEOF'
+          import json, sys
+          old = json.load(open(".secrets.baseline"))
+          new = json.load(open("/tmp/new-baseline.json"))
+          old_set = {(f, s["line_number"], s["hashed_secret"])
+                     for f, secrets in old.get("results", {}).items() for s in secrets}
+          new_set = {(f, s["line_number"], s["hashed_secret"])
+                     for f, secrets in new.get("results", {}).items() for s in secrets}
+          added = new_set - old_set
+          if added:
+              print(f"::error::{len(added)} new potential secret(s) detected:")
+              for f, line, _ in sorted(added):
+                  print(f"  {f}:{line}")
+              print("\nRun locally: detect-secrets scan > .secrets.baseline && detect-secrets audit .secrets.baseline")
+              sys.exit(1)
+          print("No new secrets detected.")
+          PYEOF
 
       - name: Check for sensitive files
         if: github.event_name == 'pull_request'
@@ -170,12 +153,18 @@ jobs:
           fi
           echo "No stray console.log found."
 
+      - name: Audit GitHub Actions workflows
+        if: github.event_name == 'pull_request'
+        run: |
+          pip install zizmor
+          zizmor --config zizmor.yml .github/workflows/
+
       - name: Check version bump
         if: github.event_name == 'pull_request'
         run: |
-          # Skip version bump check if only CI/docs files changed
+          # Skip version bump check if only CI/docs/config files changed
           CHANGED=$(git diff --name-only origin/main...HEAD)
-          CODE_CHANGED=$(echo "$CHANGED" | grep -v '^\.github/' | grep -v '^LICENSE' | grep -v '^CONTRIBUTING\.md' | grep -v '^SECURITY\.md' | grep -v '^\.github/.*\.md$' || true)
+          CODE_CHANGED=$(echo "$CHANGED" | grep -v '^\.github/' | grep -v '^LICENSE' | grep -v '^CONTRIBUTING\.md' | grep -v '^SECURITY\.md' | grep -v '^CHANGELOG\.md' | grep -v '^\.gitattributes$' | grep -v '^\.gitignore$' | grep -v '^\.detect-secrets' | grep -v '^\.pre-commit' | grep -v '^\.secrets\.baseline$' | grep -v '^zizmor\.yml$' | grep -v '^\.github/.*\.md$' || true)
 
           if [ -z "$CODE_CHANGED" ]; then
             echo "Only CI/docs files changed — skipping version bump check."
@@ -214,6 +203,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-node@v4
         with:
@@ -249,4 +240,80 @@ jobs:
           else
             npm publish --access public --provenance
             echo "Published @castlekit/castle@$VERSION"
+          fi
+
+      - name: Update changelog
+        run: |
+          # Auto-generate CHANGELOG.md from git tags and commit messages
+          cat > CHANGELOG.md << 'HEADER'
+          # Changelog
+
+          All notable changes to Castle are documented here.
+          This file is auto-generated from git history on each release.
+
+          HEADER
+
+          # Trim leading whitespace from heredoc
+          sed -i 's/^          //' CHANGELOG.md
+
+          TAGS=$(git tag --sort=-version:refname)
+          PREV=""
+          for TAG in $TAGS; do
+            DATE=$(git log -1 --format='%as' "$TAG")
+            VERSION="${TAG#v}"
+            echo "" >> CHANGELOG.md
+            echo "## $VERSION ($DATE)" >> CHANGELOG.md
+
+            if [ -n "$PREV" ]; then
+              RANGE="$TAG..$PREV"
+            else
+              # Most recent tag — include commits from tag to HEAD
+              RANGE="$TAG..HEAD"
+            fi
+            PREV="$TAG"
+
+            # Categorize commits
+            ADDED=""
+            FIXED=""
+            CHANGED=""
+
+            while IFS= read -r line; do
+              msg="${line#* }"
+              case "$msg" in
+                Add*|Implement*|"Full "*|"Chat V1"*|"Phase 1"*|"Universal Search"*)
+                  ADDED="$ADDED\n- $msg" ;;
+                Fix*|"FTS5 "*|Recover*)
+                  FIXED="$FIXED\n- $msg" ;;
+                Bump*|Merge*) ;;
+                *)
+                  CHANGED="$CHANGED\n- $msg" ;;
+              esac
+            done <<< "$(git log --oneline "$RANGE" 2>/dev/null || git log --oneline "$TAG")"
+
+            if [ -n "$ADDED" ]; then
+              echo "" >> CHANGELOG.md
+              echo "### Added" >> CHANGELOG.md
+              echo -e "$ADDED" >> CHANGELOG.md
+            fi
+            if [ -n "$FIXED" ]; then
+              echo "" >> CHANGELOG.md
+              echo "### Fixed" >> CHANGELOG.md
+              echo -e "$FIXED" >> CHANGELOG.md
+            fi
+            if [ -n "$CHANGED" ]; then
+              echo "" >> CHANGELOG.md
+              echo "### Changed" >> CHANGELOG.md
+              echo -e "$CHANGED" >> CHANGELOG.md
+            fi
+          done
+
+          # Commit updated changelog back to main
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add CHANGELOG.md
+          if git diff --cached --quiet; then
+            echo "No changelog changes to commit."
+          else
+            git commit -m "docs: update CHANGELOG.md [skip ci]"
+            git push origin main
           fi
