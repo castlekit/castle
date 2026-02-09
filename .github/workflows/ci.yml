@@ -30,7 +30,7 @@ jobs:
         if: github.event_name == 'pull_request'
         run: |
           pip install detect-secrets==1.5.0
-          export PYTHONPATH=.detect-secrets-plugins
+          export PYTHONPATH=.
 
           # Fresh scan → compare against committed baseline
           detect-secrets scan \
