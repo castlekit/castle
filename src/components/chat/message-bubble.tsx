@@ -25,6 +25,8 @@ interface MessageBubbleProps {
   agentStatus?: AgentStatus;
   userStatus?: AgentStatus;
   highlighted?: boolean;
+  /** When true, shows bouncing dots instead of message content (typing indicator) */
+  isTypingIndicator?: boolean;
 }
 
 export function MessageBubble({
@@ -39,6 +41,7 @@ export function MessageBubble({
   agentStatus,
   userStatus,
   highlighted,
+  isTypingIndicator,
 }: MessageBubbleProps) {
   const formattedTime = formatTime(message.createdAt);
   const fullDateTime = formatDateTime(message.createdAt);
@@ -88,7 +91,7 @@ export function MessageBubble({
               {displayName}
             </span>
             <Tooltip content={fullDateTime} side="top" delay={800}>
-              <span className="text-xs text-foreground-secondary hover:text-foreground cursor-pointer transition-colors">
+              <span className={cn("text-xs text-foreground-secondary hover:text-foreground cursor-pointer transition-colors", isTypingIndicator && "opacity-0")}>
                 {formattedTime}
               </span>
             </Tooltip>
@@ -96,7 +99,7 @@ export function MessageBubble({
         )}
 
         {/* Attachments */}
-        {hasAttachments && (
+        {!isTypingIndicator && hasAttachments && (
           <div className="flex gap-2 flex-wrap mb-1">
             {message.attachments.map((att) => (
               <img
@@ -110,18 +113,31 @@ export function MessageBubble({
         )}
 
         {/* Message text — no bubble, just plain text */}
-        <div className="text-[15px] text-foreground leading-[26px] break-words">
-          <TwemojiText>
-            {isAgent && message.content ? (
-              <MarkdownContent content={message.content} />
-            ) : (
-              <span className="whitespace-pre-wrap">{message.content}</span>
-            )}
-          </TwemojiText>
+        <div className="text-[15px] text-foreground leading-[26px] break-words relative">
+          {isTypingIndicator ? (
+            <>
+              <span className="opacity-0" aria-hidden>Xxxxx</span>
+              <span className="absolute left-0 top-0 h-[26px] inline-flex items-center gap-1">
+                <span className="w-1.5 h-1.5 bg-foreground-secondary/60 rounded-full" style={{ animation: "dot-bounce 1.4s ease-in-out infinite", animationDelay: "0s" }} />
+                <span className="w-1.5 h-1.5 bg-foreground-secondary/60 rounded-full" style={{ animation: "dot-bounce 1.4s ease-in-out infinite", animationDelay: "0.16s" }} />
+                <span className="w-1.5 h-1.5 bg-foreground-secondary/60 rounded-full" style={{ animation: "dot-bounce 1.4s ease-in-out infinite", animationDelay: "0.32s" }} />
+              </span>
+            </>
+          ) : (
+            <>
+              <TwemojiText>
+                {isAgent && message.content ? (
+                  <MarkdownContent content={message.content} />
+                ) : (
+                  <span className="whitespace-pre-wrap">{message.content}</span>
+                )}
+              </TwemojiText>
 
-          {/* Streaming cursor */}
-          {isStreaming && (
-            <span className="inline-block w-2 h-4 bg-foreground/50 animate-pulse ml-0.5 align-text-bottom" />
+              {/* Streaming cursor */}
+              {isStreaming && (
+                <span className="inline-block w-2 h-4 bg-foreground/50 animate-pulse ml-0.5 align-text-bottom" />
+              )}
+            </>
           )}
         </div>
 

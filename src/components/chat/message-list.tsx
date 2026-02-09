@@ -1,60 +1,37 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useCallback, useState } from "react";
-import { Bot, CalendarDays, ChevronUp, Loader2, MessageSquare, Zap } from "lucide-react";
+import { CalendarDays, ChevronUp, Loader2, MessageSquare, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { MessageBubble } from "./message-bubble";
 import { SessionDivider } from "./session-divider";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useAgentStatus, setAgentActive, getThinkingChannel, USER_STATUS_ID } from "@/lib/hooks/use-agent-status";
 import { formatDate } from "@/lib/date-utils";
 import type { ChatMessage, ChannelSession, StreamingMessage } from "@/lib/types/chat";
 import type { AgentInfo } from "./agent-mention-popup";
 
 // ---------------------------------------------------------------------------
-// Reusable typing indicator (bouncing dots with agent avatar)
-// ---------------------------------------------------------------------------
-
-function TypingIndicator({
-  agentId,
-  agentName,
-  agentAvatar,
-}: {
-  agentId: string;
-  agentName?: string;
-  agentAvatar?: string | null;
-}) {
-  const { getStatus } = useAgentStatus();
-  const status = getStatus(agentId);
-  const avatarStatus = ({ thinking: "away", active: "online", idle: "offline" } as const)[status];
-
-  return (
-    <div className="flex gap-3 mt-4">
-      <div className="mt-0.5">
-        <Avatar size="sm" status={avatarStatus} statusPulse={status === "thinking"}>
-          {agentAvatar ? (
-            <AvatarImage src={agentAvatar} alt={agentName || "Agent"} />
-          ) : (
-            <AvatarFallback className="bg-accent/20 text-accent">
-              <Bot className="w-4 h-4" />
-            </AvatarFallback>
-          )}
-        </Avatar>
-      </div>
-      <div className="flex flex-col">
-        <div className="flex items-center gap-2 mb-0.5">
-          <span className="font-bold text-[15px] text-foreground">
-            {agentName || agentId}
-          </span>
-        </div>
-        <div className="flex items-center gap-1 py-1">
-          <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce [animation-delay:-0.3s]" />
-          <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce [animation-delay:-0.15s]" />
-          <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce" />
-        </div>
-      </div>
-    </div>
-  );
+// Build a lightweight fake ChatMessage for the typing-indicator MessageBubble.
+// This avoids a separate component entirely — the indicator IS a MessageBubble.
+function makeIndicatorMessage(agentId: string, agentName?: string): ChatMessage {
+  return {
+    id: `typing-${agentId}`,
+    channelId: "",
+    sessionId: null,
+    senderType: "agent",
+    senderId: agentId,
+    senderName: agentName || null,
+    content: "",
+    status: undefined as never,
+    mentionedAgentId: null,
+    runId: null,
+    sessionKey: null,
+    inputTokens: null,
+    outputTokens: null,
+    createdAt: Date.now(),
+    attachments: [],
+    reactions: [],
+  };
 }
 
 interface MessageListProps {
@@ -597,11 +574,15 @@ export function MessageList({
           Array.from(streamingMessages.values())
             .filter((sm) => !messages.some((m) => m.runId === sm.runId && m.senderType === "agent"))
             .map((sm) => (
-              <TypingIndicator
+              <MessageBubble
                 key={`streaming-${sm.runId}`}
-                agentId={sm.agentId}
+                message={makeIndicatorMessage(sm.agentId, sm.agentName || getAgentName(sm.agentId))}
+                isAgent
                 agentName={sm.agentName || getAgentName(sm.agentId)}
                 agentAvatar={getAgentAvatar(sm.agentId)}
+                agents={agents}
+                agentStatus={getAgentStatus(sm.agentId)}
+                isTypingIndicator
               />
             ))}
 
@@ -639,11 +620,15 @@ export function MessageList({
               || agentId;
             const fallbackAvatar = agentInfo?.avatar ?? null;
             return (
-              <TypingIndicator
+              <MessageBubble
                 key={`thinking-${agentId}`}
-                agentId={agentId}
+                message={makeIndicatorMessage(agentId, fallbackName)}
+                isAgent
                 agentName={fallbackName}
                 agentAvatar={fallbackAvatar}
+                agents={agents}
+                agentStatus={getAgentStatus(agentId)}
+                isTypingIndicator
               />
             );
           })}
