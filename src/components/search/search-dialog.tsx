@@ -4,6 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Clock, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDateTime } from "@/lib/date-utils";
 import { useSearch } from "@/lib/hooks/use-search";
 import type {
   SearchResult,
@@ -16,10 +17,7 @@ import type {
 // ============================================================================
 
 function MessageResultRow({ result }: { result: MessageSearchResult }) {
-  const timeStr = new Date(result.timestamp).toLocaleDateString([], {
-    month: "short",
-    day: "numeric",
-  });
+  const timeStr = formatDateTime(result.timestamp);
 
   return (
     <div className="flex items-start gap-3 min-w-0">

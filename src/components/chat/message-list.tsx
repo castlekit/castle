@@ -6,6 +6,7 @@ import { MessageBubble } from "./message-bubble";
 import { SessionDivider } from "./session-divider";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useAgentStatus, setAgentActive, getThinkingChannel, USER_STATUS_ID } from "@/lib/hooks/use-agent-status";
+import { formatDate } from "@/lib/date-utils";
 import type { ChatMessage, ChannelSession, StreamingMessage } from "@/lib/types/chat";
 import type { AgentInfo } from "./agent-mention-popup";
 
@@ -272,12 +273,7 @@ export function MessageList({
     if (isToday) return "Today";
     if (isYesterday) return "Yesterday";
 
-    return date.toLocaleDateString(undefined, {
-      weekday: "long",
-      month: "long",
-      day: "numeric",
-      year: date.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
-    });
+    return formatDate(timestamp);
   };
 
   // Get the date string (YYYY-MM-DD) for grouping
@@ -353,7 +349,7 @@ export function MessageList({
           <div className="flex flex-col items-center py-8 mb-2">
             <CalendarDays className="h-9 w-9 text-foreground-secondary/40 mb-3" />
             <span className="text-sm font-medium text-foreground-secondary">
-              Channel created on {new Date(channelCreatedAt).toLocaleDateString(undefined, { month: "long", day: "numeric", year: "numeric" })}
+              Channel created on {formatDate(new Date(channelCreatedAt).getTime())}
             </span>
             <span className="text-xs text-foreground-secondary/60 mt-1">
               This is the very beginning of the conversation

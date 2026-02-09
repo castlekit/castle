@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatDateTime } from "@/lib/date-utils";
 import type { ChannelSession } from "@/lib/types/chat";
 
 interface SessionDividerProps {
@@ -14,11 +15,7 @@ export function SessionDivider({ session, className }: SessionDividerProps) {
   const [expanded, setExpanded] = useState(false);
 
   const endedDate = session.endedAt
-    ? new Date(session.endedAt).toLocaleDateString([], {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })
+    ? formatDateTime(session.endedAt)
     : "Ongoing";
 
   return (

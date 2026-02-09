@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, RotateCcw, Trash2, MessageCircle } from "lucide-react";
+import { Loader2, RotateCcw, Trash2, Hash, MessageCircle } from "lucide-react";
 import { Dialog, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { formatDateTime, formatTimeAgo } from "@/lib/date-utils";
 import type { Channel } from "@/lib/types/chat";
 
 interface ArchivedChannelsProps {
@@ -103,20 +104,20 @@ export function ArchivedChannels({
             {channels.map((channel) => (
               <div
                 key={channel.id}
-                className="flex items-center justify-between px-3 py-2.5 rounded-lg bg-surface-hover/50 hover:bg-surface-hover group"
+                className="flex items-center justify-between px-3 py-2.5 rounded-[var(--radius-sm)] bg-surface-hover/50 hover:bg-surface-hover group"
               >
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <MessageCircle className="h-4 w-4 shrink-0 text-foreground-secondary" />
+                <div className="flex items-center gap-1.5 min-w-0">
+                  <Hash className="h-4 w-4 shrink-0 text-foreground-secondary" strokeWidth={2.5} />
                   <div className="min-w-0">
                     <span className="text-sm text-foreground truncate block">
                       {channel.name}
                     </span>
-                    {channel.archivedAt && (
-                      <span className="text-xs text-foreground-secondary">
-                        Archived{" "}
-                        {new Date(channel.archivedAt).toLocaleDateString()}
-                      </span>
-                    )}
+                    <span className="text-xs text-foreground-secondary">
+                      Created {formatDateTime(new Date(channel.createdAt).getTime())}
+                      {channel.archivedAt && (
+                        <> · Archived {formatTimeAgo(new Date(channel.archivedAt).getTime())}</>
+                      )}
+                    </span>
                   </div>
                 </div>
 

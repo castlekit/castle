@@ -3,6 +3,7 @@
 import React from "react";
 import { Bot, User, AlertTriangle, StopCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatTime, formatDateTime } from "@/lib/date-utils";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownContent } from "./markdown-content";
@@ -39,21 +40,8 @@ export function MessageBubble({
   userStatus,
   highlighted,
 }: MessageBubbleProps) {
-  const messageDate = new Date(message.createdAt);
-  const formattedTime = messageDate.toLocaleTimeString([], {
-    hour: "numeric",
-    minute: "2-digit",
-    hour12: true,
-  });
-  const fullDateTime = messageDate.toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
+  const formattedTime = formatTime(message.createdAt);
+  const fullDateTime = formatDateTime(message.createdAt);
 
   // Prefer the name stored on the message (always available from DB, no FOUC).
   // Fall back to the live agent name from the gateway, then a generic label.

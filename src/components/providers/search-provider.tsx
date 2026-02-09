@@ -65,7 +65,7 @@ export function SearchProvider({ children }: { children: React.ReactNode }) {
       {showSearchBar && (
         <button
           onClick={openSearch}
-          className="fixed top-[28px] right-[28px] z-50 flex items-center gap-3 pl-3 pr-2.5 h-[38px] w-[320px] rounded-[var(--radius-sm)] bg-surface border border-border hover:border-border-hover text-foreground-secondary hover:text-foreground transition-colors cursor-pointer shadow-sm"
+          className="fixed top-[28px] right-[28px] z-40 flex items-center gap-3 pl-3 pr-2.5 h-[38px] w-[320px] rounded-[var(--radius-sm)] bg-surface border border-border hover:border-border-hover text-foreground-secondary hover:text-foreground transition-colors cursor-pointer shadow-sm"
         >
           <Search className="h-4 w-4 shrink-0" strokeWidth={2.5} />
           <span className="text-sm text-foreground-secondary/50 flex-1 text-left">Search Castle...</span>
