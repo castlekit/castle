@@ -599,7 +599,11 @@ export async function runOnboarding(): Promise<void> {
     ? [serverScript]
     : [nextBin, "start", "-p", String(config.server?.port || 3333)];
 
-  // Environment for standalone mode needs PORT and HOSTNAME
+  // Environment for standalone mode needs PORT, HOSTNAME, and NODE_PATH
+  // NODE_PATH is critical: the standalone bundle ships without node_modules
+  // (native modules like better-sqlite3 are platform-specific and can't be
+  // bundled cross-platform). NODE_PATH tells Node to resolve packages from
+  // the package root's node_modules/ where npm installed correct binaries.
   const serverEnv: Record<string, string> = {
     NODE_ENV: "production",
     PATH: process.env.PATH || "",
@@ -607,6 +611,7 @@ export async function runOnboarding(): Promise<void> {
   if (serverScript) {
     serverEnv.PORT = String(config.server?.port || 3333);
     serverEnv.HOSTNAME = "0.0.0.0";
+    serverEnv.NODE_PATH = join(PROJECT_ROOT, "node_modules");
   }
 
   // Castle port from config or default

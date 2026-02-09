@@ -24,7 +24,7 @@
     "!src/**/*.test.*"
   ],
   "scripts": {
-    "prepack": "next build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public 2>/dev/null || true",
+    "prepack": "next build && cp -r .next/static .next/standalone/.next/static && cp -r public .next/standalone/public 2>/dev/null || true && rm -rf .next/standalone/node_modules",
     "dev": "next dev -p 3333",
     "build": "next build",
     "start": "next start -p 3333",

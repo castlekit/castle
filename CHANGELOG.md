@@ -21,6 +21,7 @@ All notable changes to Castle are documented here.
 ### Fixed
 
 - **"Build failed" during global install** — root cause was `npm run build` executing inside the read-only global `node_modules` directory without `devDependencies`. Now skipped entirely for pre-built packages.
+- **Cross-platform native module crash** — standalone bundle no longer ships `node_modules/` (which contained platform-specific binaries like `better-sqlite3` from the build machine). Instead, `NODE_PATH` resolves packages from the npm-installed `node_modules/` with correct platform binaries.
 
 ## 0.3.2 (2026-02-09)
 
