@@ -32,10 +32,15 @@ jobs:
           pip install detect-secrets==1.5.0
           # PYTHONPATH loads the Castle/OpenClaw custom detector plugin
           export PYTHONPATH=.detect-secrets-plugins
-          detect-secrets scan \
-            --baseline .secrets.baseline \
+          # Scan and update baseline — fails if new unaudited secrets are found
+          detect-secrets scan --update .secrets.baseline \
             --exclude-files '(^|/)(package-lock\.json$|dist/|\.next/|node_modules/|\.detect-secrets\.cfg$|\.secrets\.baseline$)'
-          detect-secrets audit --report --baseline .secrets.baseline
+          # Check if baseline has changed (new secrets detected)
+          if ! git diff --quiet .secrets.baseline; then
+            echo "::error::New potential secrets detected. Run 'detect-secrets audit .secrets.baseline' locally, then commit the updated baseline."
+            git diff .secrets.baseline
+            exit 1
+          fi
 
       - name: Check for sensitive files
         if: github.event_name == 'pull_request'
