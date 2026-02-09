@@ -1,59 +1,37 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useCallback } from "react";
-import { Bot, CalendarDays, Loader2, MessageSquare } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useCallback, useState } from "react";
+import { CalendarDays, ChevronUp, Loader2, MessageSquare, Zap } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { MessageBubble } from "./message-bubble";
 import { SessionDivider } from "./session-divider";
-import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { useAgentStatus, setAgentActive, getThinkingChannel, USER_STATUS_ID } from "@/lib/hooks/use-agent-status";
 import { formatDate } from "@/lib/date-utils";
 import type { ChatMessage, ChannelSession, StreamingMessage } from "@/lib/types/chat";
 import type { AgentInfo } from "./agent-mention-popup";
 
 // ---------------------------------------------------------------------------
-// Reusable typing indicator (bouncing dots with agent avatar)
-// ---------------------------------------------------------------------------
-
-function TypingIndicator({
-  agentId,
-  agentName,
-  agentAvatar,
-}: {
-  agentId: string;
-  agentName?: string;
-  agentAvatar?: string | null;
-}) {
-  const { getStatus } = useAgentStatus();
-  const status = getStatus(agentId);
-  const avatarStatus = ({ thinking: "away", active: "online", idle: "offline" } as const)[status];
-
-  return (
-    <div className="flex gap-3 mt-4">
-      <div className="mt-0.5">
-        <Avatar size="sm" status={avatarStatus} statusPulse={status === "thinking"}>
-          {agentAvatar ? (
-            <AvatarImage src={agentAvatar} alt={agentName || "Agent"} />
-          ) : (
-            <AvatarFallback className="bg-accent/20 text-accent">
-              <Bot className="w-4 h-4" />
-            </AvatarFallback>
-          )}
-        </Avatar>
-      </div>
-      <div className="flex flex-col">
-        <div className="flex items-center gap-2 mb-0.5">
-          <span className="font-bold text-[15px] text-foreground">
-            {agentName || agentId}
-          </span>
-        </div>
-        <div className="flex items-center gap-1 py-1">
-          <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce [animation-delay:-0.3s]" />
-          <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce [animation-delay:-0.15s]" />
-          <span className="w-2 h-2 bg-foreground-secondary/60 rounded-full animate-bounce" />
-        </div>
-      </div>
-    </div>
-  );
+// Build a lightweight fake ChatMessage for the typing-indicator MessageBubble.
+// This avoids a separate component entirely — the indicator IS a MessageBubble.
+function makeIndicatorMessage(agentId: string, agentName?: string): ChatMessage {
+  return {
+    id: `typing-${agentId}`,
+    channelId: "",
+    sessionId: null,
+    senderType: "agent",
+    senderId: agentId,
+    senderName: agentName || null,
+    content: "",
+    status: undefined as never,
+    mentionedAgentId: null,
+    runId: null,
+    sessionKey: null,
+    inputTokens: null,
+    outputTokens: null,
+    createdAt: Date.now(),
+    attachments: [],
+    reactions: [],
+  };
 }
 
 interface MessageListProps {
@@ -76,6 +54,12 @@ interface MessageListProps {
   channelName?: string | null;
   channelCreatedAt?: number | null;
   highlightMessageId?: string;
+  /** Ref that will be populated with a navigate-between-messages function */
+  navigateRef?: React.MutableRefObject<((direction: "up" | "down") => void) | null>;
+  /** ID of the oldest message still in the agent's context (compaction boundary) */
+  compactionBoundaryMessageId?: string | null;
+  /** Total number of compactions in this session */
+  compactionCount?: number;
 }
 
 export function MessageList({
@@ -95,6 +79,9 @@ export function MessageList({
   channelName,
   channelCreatedAt,
   highlightMessageId,
+  navigateRef,
+  compactionBoundaryMessageId,
+  compactionCount,
 }: MessageListProps) {
   const { statuses: agentStatuses, getStatus: getAgentStatus } = useAgentStatus();
   const userStatus = getAgentStatus(USER_STATUS_ID);
@@ -132,6 +119,13 @@ export function MessageList({
   const isLoadingOlder = useRef(false);
   const prevScrollHeightRef = useRef<number>(0);
   const highlightHandled = useRef<string | null>(null);
+
+  // "Scroll to message start" button — shows when the last agent message
+  // extends beyond the viewport so the user can jump to where it began.
+  const [showScrollToStart, setShowScrollToStart] = useState(false);
+  const lastAgentMsgId = useRef<string | null>(null);
+  // Once the user has navigated to a message's start, don't show the button again for it
+  const dismissedMsgId = useRef<string | null>(null);
 
   // Scroll helper
   const scrollToBottom = useCallback(() => {
@@ -229,9 +223,57 @@ export function MessageList({
     }
   }, [highlightMessageId, messages]);
 
+  // Track the last agent message ID so we can check if its top is in view.
+  // On initial load, auto-dismiss so the button only appears for NEW messages.
+  useEffect(() => {
+    const lastAgent = [...messages].reverse().find((m) => m.senderType === "agent");
+    const prevId = lastAgentMsgId.current;
+    lastAgentMsgId.current = lastAgent?.id ?? null;
+
+    if (!lastAgent) {
+      setShowScrollToStart(false);
+    } else if (prevId === null) {
+      // First time we see messages (page load) — dismiss the current one
+      dismissedMsgId.current = lastAgent.id;
+    }
+  }, [messages]);
+
+  // Check if the last agent message's top edge is scrolled out of view.
+  // Called on every scroll event via handleScroll.
+  const checkScrollToStart = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!lastAgentMsgId.current || !container) {
+      setShowScrollToStart(false);
+      return;
+    }
+    // Already dismissed for this message — don't show again
+    if (dismissedMsgId.current === lastAgentMsgId.current) {
+      setShowScrollToStart(false);
+      return;
+    }
+    const el = document.getElementById(`msg-${lastAgentMsgId.current}`);
+    if (!el) {
+      setShowScrollToStart(false);
+      return;
+    }
+    const containerRect = container.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+    // Show button when the top of the message is above the container's top edge
+    // AND the bottom is still visible (user is reading the message)
+    const topAboveView = elRect.top < containerRect.top - 10;
+    const bottomStillVisible = elRect.bottom > containerRect.top;
+    const shouldShow = topAboveView && bottomStillVisible;
+    // If user scrolled to the top of the message, dismiss permanently
+    if (!topAboveView && dismissedMsgId.current !== lastAgentMsgId.current) {
+      dismissedMsgId.current = lastAgentMsgId.current;
+    }
+    setShowScrollToStart(shouldShow);
+  }, []);
+
   // Infinite scroll: up for older messages, down for newer messages
   const handleScroll = useCallback(() => {
     checkIfPinned();
+    checkScrollToStart();
     const container = scrollContainerRef.current;
     if (!container) return;
 
@@ -250,7 +292,7 @@ export function MessageList({
     if (scrollBottom < 100 && hasMoreAfter && !loadingNewer && onLoadNewer) {
       onLoadNewer();
     }
-  }, [hasMore, loadingMore, onLoadMore, hasMoreAfter, loadingNewer, onLoadNewer, checkIfPinned]);
+  }, [hasMore, loadingMore, onLoadMore, hasMoreAfter, loadingNewer, onLoadNewer, checkIfPinned, checkScrollToStart]);
 
   const getAgentName = (agentId: string) => {
     const agent = agents.find((a) => a.id === agentId);
@@ -261,18 +303,6 @@ export function MessageList({
     const agent = agents.find((a) => a.id === agentId);
     return agent?.avatar;
   };
-
-  if (!loading && messages.length === 0 && (!streamingMessages || streamingMessages.size === 0)) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="flex flex-col items-center">
-          <MessageSquare className="h-9 w-9 text-foreground-secondary/40 mb-3" />
-          <span className="text-sm font-medium text-foreground-secondary">No messages yet</span>
-          <span className="text-xs text-foreground-secondary/60 mt-1">Start the conversation</span>
-        </div>
-      </div>
-    );
-  }
 
   // Format a date label like Slack does
   const formatDateLabel = (timestamp: number): string => {
@@ -333,12 +363,85 @@ export function MessageList({
     groupedContent.push(message);
   }
 
+  // Navigate between messages with Shift+Up/Down (also used by "Start of message" button)
+  const navigateToMessage = useCallback(
+    (direction: "up" | "down") => {
+      const container = scrollContainerRef.current;
+      if (!container || messages.length === 0) return;
+
+      const containerRect = container.getBoundingClientRect();
+      const threshold = 10; // px tolerance to avoid sticking on current message
+
+      if (direction === "up") {
+        // Find the last message whose top is above the current viewport top
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const el = document.getElementById(`msg-${messages[i].id}`);
+          if (!el) continue;
+          const rect = el.getBoundingClientRect();
+          if (rect.top < containerRect.top - threshold) {
+            const offset =
+              rect.top - containerRect.top + container.scrollTop - 8;
+            container.scrollTo({ top: offset, behavior: "smooth" });
+            return;
+          }
+        }
+        // Already at the top — scroll to very top
+        container.scrollTo({ top: 0, behavior: "smooth" });
+      } else {
+        // Find the first message whose top is below the current viewport top
+        for (let i = 0; i < messages.length; i++) {
+          const el = document.getElementById(`msg-${messages[i].id}`);
+          if (!el) continue;
+          const rect = el.getBoundingClientRect();
+          if (rect.top > containerRect.top + threshold) {
+            const offset =
+              rect.top - containerRect.top + container.scrollTop - 8;
+            container.scrollTo({ top: offset, behavior: "smooth" });
+            return;
+          }
+        }
+        // Already at the bottom — scroll to very bottom
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: "smooth",
+        });
+      }
+    },
+    [messages]
+  );
+
+  // Expose navigateToMessage to parent via ref
+  useEffect(() => {
+    if (navigateRef) {
+      navigateRef.current = navigateToMessage;
+    }
+    return () => {
+      if (navigateRef) {
+        navigateRef.current = null;
+      }
+    };
+  }, [navigateRef, navigateToMessage]);
+
+  if (!loading && messages.length === 0 && (!streamingMessages || streamingMessages.size === 0)) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="flex flex-col items-center">
+          <MessageSquare className="h-9 w-9 text-foreground-secondary/40 mb-3" />
+          <span className="text-sm font-medium text-foreground-secondary">No messages yet</span>
+          <span className="text-xs text-foreground-secondary/60 mt-1">Start the conversation</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div
-      ref={scrollContainerRef}
-      className="flex-1 overflow-y-auto"
-      onScroll={handleScroll}
-    >
+    <div className="flex-1 relative overflow-hidden">
+      <div
+        ref={scrollContainerRef}
+        className="h-full overflow-y-auto flex flex-col"
+        onScroll={handleScroll}
+      >
+      <div className="flex-1" />
       <div ref={contentRef} className="py-[20px] pr-[20px]">
         {/* Loading more indicator */}
         {loadingMore && (
@@ -409,20 +512,41 @@ export function MessageList({
             && prevMessage.senderType === message.senderType
             && prevMessage.senderId === message.senderId;
 
+          // Determine if this message is compacted (before the boundary)
+          const isCompacted = compactionBoundaryMessageId
+            ? message.id !== compactionBoundaryMessageId &&
+              messages.indexOf(message) < messages.findIndex((m) => m.id === compactionBoundaryMessageId)
+            : false;
+
+          // Show compaction divider just before the boundary message
+          const showCompactionDivider = compactionBoundaryMessageId === message.id && (compactionCount ?? 0) > 0;
+
           return (
             <div key={message.id} id={`msg-${message.id}`}>
-              <MessageBubble
-                message={message}
-                isAgent={message.senderType === "agent"}
-                agentName={agent?.name || getAgentName(message.senderId)}
-                agentAvatar={agent?.avatar || getAgentAvatar(message.senderId)}
-                userAvatar={userAvatar}
-                agents={agents}
-                showHeader={!isSameSender}
-                agentStatus={message.senderType === "agent" ? getAgentStatus(message.senderId) : undefined}
-                userStatus={message.senderType === "user" ? userStatus : undefined}
-                highlighted={highlightMessageId === message.id}
-              />
+              {showCompactionDivider && (
+                <div className="flex items-center gap-3 py-1 my-[20px]">
+                  <div className="flex-1 h-px bg-yellow-500/30" />
+                  <span className="text-[11px] text-yellow-600 dark:text-yellow-400 shrink-0 flex items-center gap-1.5">
+                    <Zap className="h-3 w-3" />
+                    Context compacted ({compactionCount} time{compactionCount !== 1 ? "s" : ""}) — agent has a summary of messages above
+                  </span>
+                  <div className="flex-1 h-px bg-yellow-500/30" />
+                </div>
+              )}
+              <div className={cn(isCompacted && "opacity-50")}>
+                <MessageBubble
+                  message={message}
+                  isAgent={message.senderType === "agent"}
+                  agentName={agent?.name || getAgentName(message.senderId)}
+                  agentAvatar={agent?.avatar || getAgentAvatar(message.senderId)}
+                  userAvatar={userAvatar}
+                  agents={agents}
+                  showHeader={!isSameSender}
+                  agentStatus={message.senderType === "agent" ? getAgentStatus(message.senderId) : undefined}
+                  userStatus={message.senderType === "user" ? userStatus : undefined}
+                  highlighted={highlightMessageId === message.id}
+                />
+              </div>
             </div>
           );
         })}
@@ -450,11 +574,15 @@ export function MessageList({
           Array.from(streamingMessages.values())
             .filter((sm) => !messages.some((m) => m.runId === sm.runId && m.senderType === "agent"))
             .map((sm) => (
-              <TypingIndicator
+              <MessageBubble
                 key={`streaming-${sm.runId}`}
-                agentId={sm.agentId}
+                message={makeIndicatorMessage(sm.agentId, sm.agentName || getAgentName(sm.agentId))}
+                isAgent
                 agentName={sm.agentName || getAgentName(sm.agentId)}
                 agentAvatar={getAgentAvatar(sm.agentId)}
+                agents={agents}
+                agentStatus={getAgentStatus(sm.agentId)}
+                isTypingIndicator
               />
             ))}
 
@@ -492,17 +620,47 @@ export function MessageList({
               || agentId;
             const fallbackAvatar = agentInfo?.avatar ?? null;
             return (
-              <TypingIndicator
+              <MessageBubble
                 key={`thinking-${agentId}`}
-                agentId={agentId}
+                message={makeIndicatorMessage(agentId, fallbackName)}
+                isAgent
                 agentName={fallbackName}
                 agentAvatar={fallbackAvatar}
+                agents={agents}
+                agentStatus={getAgentStatus(agentId)}
+                isTypingIndicator
               />
             );
           })}
 
         <div ref={bottomRef} />
       </div>
+      </div>
+
+      {/* Scroll to message start — appears when the last agent message's top is out of view */}
+      {showScrollToStart && (
+        <button
+          onClick={() => {
+            dismissedMsgId.current = lastAgentMsgId.current;
+            setShowScrollToStart(false);
+            // Scroll directly to the last agent message's start
+            if (lastAgentMsgId.current) {
+              const el = document.getElementById(`msg-${lastAgentMsgId.current}`);
+              const container = scrollContainerRef.current;
+              if (el && container) {
+                const containerRect = container.getBoundingClientRect();
+                const elRect = el.getBoundingClientRect();
+                const offset = elRect.top - containerRect.top + container.scrollTop - 8;
+                container.scrollTo({ top: offset, behavior: "smooth" });
+              }
+            }
+          }}
+          className="absolute bottom-3 right-0 h-12 w-12 flex items-center justify-center rounded-[var(--radius-sm)] bg-surface border border-border shadow-md text-foreground-secondary hover:text-foreground hover:border-border-hover transition-all cursor-pointer z-10"
+          title="Scroll to start of message (Shift+↑)"
+        >
+          <ChevronUp className="h-5 w-5" />
+        </button>
+      )}
     </div>
   );
 }

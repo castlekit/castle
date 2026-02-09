@@ -25,7 +25,7 @@ const MAX_BACKUPS = 5;
 const CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000;
 
 /** Current schema version — bump when adding new migrations */
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 // ============================================================================
 // Singleton
@@ -353,7 +353,8 @@ const TABLE_SQL = `
     ended_at INTEGER,
     summary TEXT,
     total_input_tokens INTEGER DEFAULT 0,
-    total_output_tokens INTEGER DEFAULT 0
+    total_output_tokens INTEGER DEFAULT 0,
+    compaction_boundary_message_id TEXT
   );
   CREATE INDEX IF NOT EXISTS idx_sessions_channel ON sessions(channel_id, started_at);
 
@@ -486,6 +487,15 @@ function runMigrations(
         created_at INTEGER NOT NULL
       )
     `);
+  }
+
+  // --- Migration 6: Add compaction_boundary_message_id to sessions ---
+  const sessionColsV6 = sqlite.prepare("PRAGMA table_info(sessions)").all() as {
+    name: string;
+  }[];
+  if (!sessionColsV6.some((c) => c.name === "compaction_boundary_message_id")) {
+    console.log("[Castle DB] Migration: adding compaction_boundary_message_id to sessions");
+    sqlite.exec("ALTER TABLE sessions ADD COLUMN compaction_boundary_message_id TEXT");
   }
 
   // Checkpoint after migration to persist changes to main DB file immediately

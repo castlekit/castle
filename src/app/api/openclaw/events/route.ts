@@ -36,11 +36,19 @@ function redactEventPayload(evt: GatewayEvent): GatewayEvent {
  * SSE endpoint -- streams OpenClaw Gateway events to the browser in real-time.
  * Browser connects once via EventSource and receives push updates.
  */
-export async function GET() {
+export async function GET(request: Request) {
   const gw = ensureGateway();
 
   const encoder = new TextEncoder();
   let closed = false;
+  const connectedAt = Date.now();
+  let eventCount = 0;
+
+  console.log(`[SSE] Client connected (gateway: ${gw.state})`);
+
+  // Use the request's AbortSignal as the primary cleanup mechanism.
+  // ReadableStream.cancel() is unreliable in some environments.
+  const signal = request.signal;
 
   const stream = new ReadableStream({
     start(controller) {
@@ -58,11 +66,13 @@ export async function GET() {
       // Forward gateway events (with sensitive fields redacted)
       const onGatewayEvent = (evt: GatewayEvent) => {
         if (closed) return;
+        eventCount++;
         try {
           const safe = redactEventPayload(evt);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(safe)}\n\n`));
-        } catch {
-          // Stream may have closed
+        } catch (err) {
+          console.warn(`[SSE] Stream write failed for event ${evt.event}:`, (err as Error).message);
+          cleanup();
         }
       };
 
@@ -80,7 +90,7 @@ export async function GET() {
           };
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(msg)}\n\n`));
         } catch {
-          // Stream may have closed
+          cleanup();
         }
       };
 
@@ -90,23 +100,28 @@ export async function GET() {
         try {
           controller.enqueue(encoder.encode(`: heartbeat\n\n`));
         } catch {
-          // Stream may have closed
+          cleanup();
         }
       }, 30000);
 
       gw.on("gatewayEvent", onGatewayEvent);
       gw.on("stateChange", onStateChange);
 
-      // Cleanup when the client disconnects
+      // Cleanup: remove listeners, stop heartbeat
       const cleanup = () => {
+        if (closed) return; // prevent double cleanup
         closed = true;
+        const duration = Math.round((Date.now() - connectedAt) / 1000);
+        console.log(`[SSE] Client disconnected (${duration}s, ${eventCount} events forwarded)`);
         clearInterval(heartbeat);
         gw.off("gatewayEvent", onGatewayEvent);
         gw.off("stateChange", onStateChange);
       };
 
-      // The stream's cancel is called when the client disconnects
-      // We store cleanup for the cancel callback
+      // Primary cleanup: request.signal fires when client disconnects
+      signal.addEventListener("abort", cleanup, { once: true });
+
+      // Store for cancel callback as fallback
       (controller as unknown as { _cleanup: () => void })._cleanup = cleanup;
     },
     cancel(controller) {

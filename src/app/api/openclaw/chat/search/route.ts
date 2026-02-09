@@ -93,9 +93,10 @@ export async function GET(request: NextRequest) {
     // Future: merge results from searchTasks(), searchNotes(), etc.
     // Sort by timestamp descending (already sorted by FTS query)
 
+    console.log(`[Search API] GET OK — query="${q.slice(0, 50)}" results=${results.length}`);
     return NextResponse.json({ results });
   } catch (err) {
-    console.error("[Chat Search] Failed:", (err as Error).message);
+    console.error(`[Search API] GET FAILED — query="${q?.slice(0, 50)}":`, (err as Error).message);
     return NextResponse.json(
       { error: sanitizeForApi((err as Error).message) },
       { status: 500 }

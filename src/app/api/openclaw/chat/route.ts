@@ -22,12 +22,16 @@ const MAX_MESSAGE_LENGTH = 32768; // 32KB
 // ============================================================================
 
 export async function POST(request: NextRequest) {
+  const _start = Date.now();
   const csrf = checkCsrf(request);
   if (csrf) return csrf;
 
   // Rate limit: 30 messages per minute
   const rl = checkRateLimit(rateLimitKey(request, "chat:send"), 30);
-  if (rl) return rl;
+  if (rl) {
+    console.warn("[Chat API] Rate limited on chat:send");
+    return rl;
+  }
 
   let body: ChatSendRequest;
   try {
@@ -100,6 +104,7 @@ export async function POST(request: NextRequest) {
       sessionKey,
     });
 
+    console.log(`[Chat API] POST send OK — runId=${runId} channel=${body.channelId} (${Date.now() - _start}ms)`);
     return NextResponse.json({
       runId,
       messageId: userMsg.id,
@@ -110,9 +115,9 @@ export async function POST(request: NextRequest) {
     try {
       deleteMessage(userMsg.id);
     } catch (delErr) {
-      console.error("[Chat API] Cleanup failed:", (delErr as Error).message);
+      console.error("[Chat API] Cleanup of optimistic message failed:", (delErr as Error).message);
     }
-    console.error("[Chat API] Send failed:", (err as Error).message);
+    console.error(`[Chat API] POST send FAILED — channel=${body.channelId} (${Date.now() - _start}ms):`, (err as Error).message);
     return NextResponse.json(
       { error: sanitizeForApi((err as Error).message) },
       { status: 502 }
@@ -125,6 +130,7 @@ export async function POST(request: NextRequest) {
 // ============================================================================
 
 export async function PUT(request: NextRequest) {
+  const _start = Date.now();
   const csrf = checkCsrf(request);
   if (csrf) return csrf;
 
@@ -178,9 +184,10 @@ export async function PUT(request: NextRequest) {
       outputTokens: body.outputTokens,
     });
 
+    console.log(`[Chat API] PUT complete OK — runId=${body.runId} new msg=${agentMsg.id} (${Date.now() - _start}ms)`);
     return NextResponse.json({ messageId: agentMsg.id, updated: false });
   } catch (err) {
-    console.error("[Chat API] Complete failed:", (err as Error).message);
+    console.error(`[Chat API] PUT complete FAILED — runId=${body.runId} (${Date.now() - _start}ms):`, (err as Error).message);
     return NextResponse.json(
       { error: sanitizeForApi((err as Error).message) },
       { status: 500 }
@@ -196,12 +203,14 @@ export async function DELETE(request: NextRequest) {
   const csrf = checkCsrf(request);
   if (csrf) return csrf;
 
+  console.log("[Chat API] DELETE abort requested");
   try {
     const gateway = ensureGateway();
     await gateway.request("chat.abort", {});
+    console.log("[Chat API] DELETE abort OK");
     return NextResponse.json({ ok: true });
   } catch (err) {
-    console.error("[Chat API] Abort failed:", (err as Error).message);
+    console.error("[Chat API] DELETE abort FAILED:", (err as Error).message);
     return NextResponse.json(
       { error: sanitizeForApi((err as Error).message) },
       { status: 502 }
@@ -217,6 +226,7 @@ export async function DELETE(request: NextRequest) {
 // ============================================================================
 
 export async function GET(request: NextRequest) {
+  const _start = Date.now();
   const { searchParams } = new URL(request.url);
   const channelId = searchParams.get("channelId");
   const limit = Math.min(parseInt(searchParams.get("limit") || "50", 10), 200);
@@ -258,12 +268,13 @@ export async function GET(request: NextRequest) {
 
     // Default / backward pagination
     const msgs = getMessagesByChannel(channelId, limit, before);
+    console.log(`[Chat API] GET history OK — channel=${channelId} msgs=${msgs.length} (${Date.now() - _start}ms)`);
     return NextResponse.json({
       messages: msgs,
       hasMore: msgs.length === limit,
     });
   } catch (err) {
-    console.error("[Chat API] History failed:", (err as Error).message);
+    console.error(`[Chat API] GET history FAILED — channel=${channelId} (${Date.now() - _start}ms):`, (err as Error).message);
     return NextResponse.json(
       { error: sanitizeForApi((err as Error).message) },
       { status: 500 }

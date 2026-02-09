@@ -10,6 +10,7 @@ import type {
   ChatCompleteRequest,
 } from "@/lib/types/chat";
 import { setAgentThinking, setAgentActive } from "@/lib/hooks/use-agent-status";
+import { subscribe, getLastEventTimestamp, type SSEEvent } from "@/lib/sse-singleton";
 
 // ============================================================================
 // Fetcher
@@ -17,7 +18,10 @@ import { setAgentThinking, setAgentActive } from "@/lib/hooks/use-agent-status";
 
 const historyFetcher = async (url: string) => {
   const res = await fetch(url);
-  if (!res.ok) throw new Error("Failed to load messages");
+  if (!res.ok) {
+    console.error(`[useChat] History fetch failed: ${res.status} ${url}`);
+    throw new Error("Failed to load messages");
+  }
   return res.json();
 };
 
@@ -44,7 +48,7 @@ interface OrphanedRun {
 
 // Singleton state — shared across all unmounted chat instances
 const orphanedRuns = new Map<string, OrphanedRun>();
-let orphanedES: EventSource | null = null;
+let orphanedUnsubscribe: (() => void) | null = null;
 let orphanedSafetyTimer: ReturnType<typeof setTimeout> | null = null;
 
 function cleanupOrphaned() {
@@ -52,8 +56,8 @@ function cleanupOrphaned() {
     clearTimeout(orphanedSafetyTimer);
     orphanedSafetyTimer = null;
   }
-  orphanedES?.close();
-  orphanedES = null;
+  orphanedUnsubscribe?.();
+  orphanedUnsubscribe = null;
   orphanedRuns.clear();
 }
 
@@ -85,12 +89,14 @@ function persistOrphanedRun(
       }),
     };
 
+    console.log(`[useChat] Persisting orphaned run ${runId} (channel=${run.channelId}, status=${status})`);
     fetch("/api/openclaw/chat", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     })
       .then(() => {
+        console.log(`[useChat] Orphaned run ${runId} persisted successfully`);
         // Trigger SWR revalidation so the message shows when user navigates back
         globalMutate(
           (key) =>
@@ -98,7 +104,7 @@ function persistOrphanedRun(
             key.startsWith(`/api/openclaw/chat?channelId=${run.channelId}`),
         );
       })
-      .catch((err) => console.error("[useChat] Orphan persist failed:", err));
+      .catch((err) => console.error(`[useChat] Orphan persist failed for run ${runId}:`, err));
   }
 
   // All runs done — tear down
@@ -107,55 +113,40 @@ function persistOrphanedRun(
   }
 }
 
-function attachOrphanedHandler() {
-  if (!orphanedES) return;
+function ensureOrphanedSubscription() {
+  if (orphanedUnsubscribe) return; // already subscribed
 
-  orphanedES.onmessage = (e) => {
-    try {
-      const evt = JSON.parse(e.data);
-      if (evt.event !== "chat") return;
+  orphanedUnsubscribe = subscribe("chat", (evt: SSEEvent) => {
+    const delta = evt.payload as ChatDelta;
+    if (!delta?.runId || !orphanedRuns.has(delta.runId)) return;
 
-      const delta = evt.payload as ChatDelta;
-      if (!delta?.runId || !orphanedRuns.has(delta.runId)) return;
+    const run = orphanedRuns.get(delta.runId)!;
 
-      const run = orphanedRuns.get(delta.runId)!;
-
-      if (delta.state === "delta") {
-        const text = delta.text ?? delta.message?.content?.[0]?.text ?? "";
-        if (text) run.content += text;
-      } else if (delta.state === "final") {
-        persistOrphanedRun(delta.runId, run, delta, "complete");
-      } else if (delta.state === "error") {
-        persistOrphanedRun(delta.runId, run, delta, "interrupted");
-      }
-    } catch {
-      // Ignore parse errors
+    if (delta.state === "delta") {
+      // Skip delta accumulation — text is cumulative (full text so far),
+      // so we just wait for the "final" event which has the complete response.
+      return;
+    } else if (delta.state === "final") {
+      persistOrphanedRun(delta.runId, run, delta, "complete");
+    } else if (delta.state === "error") {
+      persistOrphanedRun(delta.runId, run, delta, "interrupted");
     }
-  };
+  });
 }
 
 /**
- * Hand off an EventSource and its active runs to the module-level handler.
- * Multiple unmounts merge into a single shared connection.
+ * Hand off active runs to the module-level orphan handler.
+ * Uses the shared SSE singleton — no separate EventSource needed.
  */
-function orphanEventSource(
-  es: EventSource,
-  newRuns: Map<string, OrphanedRun>,
-) {
+function orphanRuns(newRuns: Map<string, OrphanedRun>) {
   // Merge new runs into the shared state
   for (const [runId, run] of newRuns) {
     orphanedRuns.set(runId, run);
   }
 
-  if (orphanedES && orphanedES !== es) {
-    // Already have an orphaned ES — close the old one and use the newer
-    // (fresher) connection
-    orphanedES.close();
-  }
-  orphanedES = es;
-  attachOrphanedHandler();
+  ensureOrphanedSubscription();
 
-  // Reset safety timer (5 min) so stale connections don't leak
+  // Reset safety timer (5 min) so stale subscriptions don't leak
   if (orphanedSafetyTimer) clearTimeout(orphanedSafetyTimer);
   orphanedSafetyTimer = setTimeout(cleanupOrphaned, 5 * 60 * 1000);
 }
@@ -229,7 +220,6 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
 
   // Track active runIds for reconnection timeout
   const activeRunIds = useRef<Set<string>>(new Set());
-  const eventSourceRef = useRef<EventSource | null>(null);
 
   // Helper: update both streaming state and ref in sync
   const updateStreaming = useCallback((updater: (prev: Map<string, StreamingMessage>) => Map<string, StreamingMessage>) => {
@@ -280,6 +270,24 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
   // Default mode returns { hasMore }, anchor mode returns { hasMoreBefore, hasMoreAfter }.
   const hasMoreBefore: boolean = historyData?.hasMoreBefore ?? historyData?.hasMore ?? false;
   const hasMoreAfter: boolean = historyData?.hasMoreAfter ?? false;
+
+  // ---------------------------------------------------------------------------
+  // Initialize session key from loaded messages
+  // ---------------------------------------------------------------------------
+  // On page load, currentSessionKey is null until a message is sent.
+  // Derive it from the most recent message that has a sessionKey so the
+  // stats panel shows immediately without waiting for a new send.
+  useEffect(() => {
+    if (currentSessionKey) return; // already set by sendMessage or SSE
+    if (messages.length === 0) return;
+
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].sessionKey) {
+        setCurrentSessionKey(messages[i].sessionKey);
+        return;
+      }
+    }
+  }, [currentSessionKey, messages]);
 
   // ---------------------------------------------------------------------------
   // Load older (backward pagination)
@@ -374,192 +382,158 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
   }, [loadingNewer, hasMoreAfter, messages, channelId, mutateHistory]);
 
   // ---------------------------------------------------------------------------
-  // SSE: Listen for chat events
+  // SSE: Listen for chat events via shared singleton
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    // Use the existing SSE endpoint that forwards all gateway events
-    const es = new EventSource("/api/openclaw/events");
-    eventSourceRef.current = es;
+    const unsubscribe = subscribe("chat", (evt: SSEEvent) => {
+      const delta = evt.payload as ChatDelta;
+      if (!delta?.runId) return;
 
-    es.onmessage = (e) => {
-      try {
-        const evt = JSON.parse(e.data);
+      // Only process events for our active runs
+      if (!activeRunIds.current.has(delta.runId)) return;
 
-        // Only handle chat events
-        if (evt.event !== "chat") return;
-
-        const delta = evt.payload as ChatDelta;
-        if (!delta?.runId) return;
-
-        // Only process events for our active runs
-        if (!activeRunIds.current.has(delta.runId)) return;
-
-        if (delta.state === "delta") {
-          // Accumulate streaming text
-          const text = delta.text ?? delta.message?.content?.[0]?.text ?? "";
-          if (text) {
-            updateStreaming((prev) => {
-              const next = new Map(prev);
-              const existing = next.get(delta.runId);
-              if (existing) {
-                next.set(delta.runId, {
-                  ...existing,
-                  content: existing.content + text,
-                });
-              } else {
-                // Placeholder hasn't been created yet (race with POST response)
-                next.set(delta.runId, {
-                  runId: delta.runId,
-                  agentId: defaultAgentId || "",
-                  agentName: "",
-                  sessionKey: delta.sessionKey,
-                  content: text,
-                  startedAt: Date.now(),
-                });
-              }
-              return next;
-            });
-          }
-
-          // Update sessionKey if provided
-          if (delta.sessionKey) {
-            setCurrentSessionKey(delta.sessionKey);
-          }
-        } else if (delta.state === "final") {
-          // Guard: if we already processed this runId's final, skip
-          if (!activeRunIds.current.has(delta.runId)) return;
-          activeRunIds.current.delete(delta.runId);
-
-          // Read accumulated content from the ref (always current, no stale closure)
-          const sm = streamingRef.current.get(delta.runId);
-          const accumulatedContent = sm?.content || "";
-          const finalContent =
-            delta.text ||
-            delta.message?.content?.[0]?.text ||
-            accumulatedContent;
-          const streamAgentId = sm?.agentId || defaultAgentId || "";
-          const streamAgentName = sm?.agentName;
-          const streamSessionKey =
-            delta.sessionKey || sm?.sessionKey || "";
-
-          // Ensure typing indicator shows for at least 800ms
-          const MIN_INDICATOR_MS = 800;
-          const elapsed = sm?.startedAt ? Date.now() - sm.startedAt : MIN_INDICATOR_MS;
-          const remaining = Math.max(0, MIN_INDICATOR_MS - elapsed);
-
-          const persistAndCleanup = () => {
-            // Mark agent as active (2 min timer back to idle)
-            setAgentActive(streamAgentId);
-
-            // Persist to DB, then reload history, then remove streaming placeholder
-            if (finalContent) {
-              const completePayload: ChatCompleteRequest = {
-                runId: delta.runId,
-                channelId,
-                content: finalContent,
-                sessionKey: streamSessionKey,
-                agentId: streamAgentId,
-                agentName: streamAgentName,
-                status: "complete",
-                inputTokens: delta.message?.inputTokens,
-                outputTokens: delta.message?.outputTokens,
-              };
-
-              fetch("/api/openclaw/chat", {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(completePayload),
-              })
-                .then((res) => {
-                  if (!res.ok) {
-                    console.error("[useChat] PUT failed:", res.status);
-                  }
-                  return mutateHistory();
-                })
-                .then(() => {
-                  // Only remove streaming message AFTER history has reloaded
-                  updateStreaming((prev) => {
-                    const next = new Map(prev);
-                    next.delete(delta.runId);
-                    return next;
-                  });
-                })
-                .catch((err) => {
-                  console.error("[useChat] Complete persist failed:", err);
-                  updateStreaming((prev) => {
-                    const next = new Map(prev);
-                    next.delete(delta.runId);
-                    return next;
-                  });
-                });
-            } else {
-              // No content at all — just clean up
-              updateStreaming((prev) => {
-                const next = new Map(prev);
-                next.delete(delta.runId);
-                return next;
-              });
-            }
-          };
-
-          // Wait for minimum indicator time, then persist
-          if (remaining > 0) {
-            setTimeout(persistAndCleanup, remaining);
-          } else {
-            persistAndCleanup();
-          }
-        } else if (delta.state === "error") {
-          console.error("[useChat] Stream error:", delta.errorMessage);
-
-          // Read accumulated content from ref
-          const sm = streamingRef.current.get(delta.runId);
-          const errorContent = sm?.content || "";
-          const errorAgentId = sm?.agentId || defaultAgentId || "";
-          const errorAgentName = sm?.agentName;
-
-          // Mark agent as active even on error (it did work)
-          setAgentActive(errorAgentId);
-
-          // Remove streaming message immediately for errors
-          activeRunIds.current.delete(delta.runId);
-          updateStreaming((prev) => {
-            const next = new Map(prev);
-            next.delete(delta.runId);
-            return next;
+      if (delta.state === "delta") {
+        // Skip delta text accumulation — Gateway sends cumulative text
+        // (full response so far) in each delta, NOT incremental chunks.
+        // Just ensure a placeholder exists so UI shows the loading indicator.
+        updateStreaming((prev) => {
+          if (prev.has(delta.runId)) return prev; // already tracked
+          const next = new Map(prev);
+          next.set(delta.runId, {
+            runId: delta.runId,
+            agentId: defaultAgentId || "",
+            agentName: "",
+            sessionKey: delta.sessionKey,
+            content: "",
+            startedAt: Date.now(),
           });
+          return next;
+        });
 
-          // Save partial if we have content
-          if (errorContent) {
-            const errorPayload: ChatCompleteRequest = {
+        // Update sessionKey if provided
+        if (delta.sessionKey) {
+          setCurrentSessionKey(delta.sessionKey);
+        }
+      } else if (delta.state === "final") {
+        // Guard: if we already processed this runId's final, skip
+        if (!activeRunIds.current.has(delta.runId)) return;
+        activeRunIds.current.delete(delta.runId);
+
+        // Read streaming state from ref (always current, no stale closure)
+        const sm = streamingRef.current.get(delta.runId);
+        const finalContent =
+          delta.text ||
+          delta.message?.content?.[0]?.text ||
+          sm?.content ||
+          "";
+        const streamAgentId = sm?.agentId || defaultAgentId || "";
+        const streamAgentName = sm?.agentName;
+        const streamSessionKey =
+          delta.sessionKey || sm?.sessionKey || "";
+
+        // Ensure typing indicator shows for at least 800ms
+        const MIN_INDICATOR_MS = 800;
+        const elapsed = sm?.startedAt ? Date.now() - sm.startedAt : MIN_INDICATOR_MS;
+        const remaining = Math.max(0, MIN_INDICATOR_MS - elapsed);
+
+        const persistAndCleanup = () => {
+          setAgentActive(streamAgentId);
+
+          if (finalContent) {
+            const completePayload: ChatCompleteRequest = {
               runId: delta.runId,
               channelId,
-              content: errorContent,
-              sessionKey: delta.sessionKey || sm?.sessionKey || "",
-              agentId: errorAgentId,
-              agentName: errorAgentName,
-              status: "interrupted",
+              content: finalContent,
+              sessionKey: streamSessionKey,
+              agentId: streamAgentId,
+              agentName: streamAgentName,
+              status: "complete",
+              inputTokens: delta.message?.inputTokens,
+              outputTokens: delta.message?.outputTokens,
             };
 
             fetch("/api/openclaw/chat", {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(errorPayload),
-            }).then(() => mutateHistory())
-              .catch(() => {});
+              body: JSON.stringify(completePayload),
+            })
+              .then((res) => {
+                if (!res.ok) console.error("[useChat] PUT failed:", res.status);
+                return mutateHistory();
+              })
+              .then(() => {
+                updateStreaming((prev) => {
+                  const next = new Map(prev);
+                  next.delete(delta.runId);
+                  return next;
+                });
+              })
+              .catch((err) => {
+                console.error("[useChat] Complete persist failed:", err);
+                updateStreaming((prev) => {
+                  const next = new Map(prev);
+                  next.delete(delta.runId);
+                  return next;
+                });
+              });
+          } else {
+            updateStreaming((prev) => {
+              const next = new Map(prev);
+              next.delete(delta.runId);
+              return next;
+            });
           }
+        };
 
-          setSendError(delta.errorMessage || "Stream error");
+        if (remaining > 0) {
+          setTimeout(persistAndCleanup, remaining);
+        } else {
+          persistAndCleanup();
         }
-      } catch {
-        // Ignore parse errors
+      } else if (delta.state === "error") {
+        console.error("[useChat] Stream error:", delta.errorMessage);
+
+        const sm = streamingRef.current.get(delta.runId);
+        const errorContent = sm?.content || "";
+        const errorAgentId = sm?.agentId || defaultAgentId || "";
+        const errorAgentName = sm?.agentName;
+
+        setAgentActive(errorAgentId);
+
+        activeRunIds.current.delete(delta.runId);
+        updateStreaming((prev) => {
+          const next = new Map(prev);
+          next.delete(delta.runId);
+          return next;
+        });
+
+        if (errorContent) {
+          const errorPayload: ChatCompleteRequest = {
+            runId: delta.runId,
+            channelId,
+            content: errorContent,
+            sessionKey: delta.sessionKey || sm?.sessionKey || "",
+            agentId: errorAgentId,
+            agentName: errorAgentName,
+            status: "interrupted",
+          };
+
+          fetch("/api/openclaw/chat", {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(errorPayload),
+          }).then(() => mutateHistory())
+            .catch(() => {});
+        }
+
+        setSendError(delta.errorMessage || "Stream error");
       }
-    };
+    });
 
     return () => {
       if (activeRunIds.current.size > 0) {
-        // Agent is still processing — hand off the EventSource to the
-        // module-level handler so "final" events still get persisted
-        // even though the component is unmounting.
+        console.log(`[useChat] Unmounting with ${activeRunIds.current.size} active run(s) — handing off to orphan handler`);
+        // Agent is still processing — hand off to orphan handler
         const runs = new Map<string, OrphanedRun>();
         for (const runId of activeRunIds.current) {
           const sm = streamingRef.current.get(runId);
@@ -574,58 +548,59 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
             });
           }
         }
-        orphanEventSource(es, runs);
-      } else {
-        es.close();
+        orphanRuns(runs);
       }
-      eventSourceRef.current = null;
+      unsubscribe();
     };
-  // We intentionally omit streamingMessages and currentSessionKey from deps
-  // to prevent re-creating the EventSource on every state change.
-  // The event handler accesses them via closure that stays fresh enough.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelId, defaultAgentId, mutateHistory, updateStreaming]);
 
   // ---------------------------------------------------------------------------
-  // Reconnection timeout: mark in-flight runIds as interrupted after 30s
+  // Heartbeat-based timeout: if no SSE events arrive for 60s while we have
+  // active streaming runs, the connection is likely dead — mark as interrupted.
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    // When streamingMessages changes, check for stale runs
-    const timer = setTimeout(() => {
-      const now = Date.now();
-      updateStreaming((prev) => {
-        const next = new Map(prev);
-        let changed = false;
-        for (const [runId, sm] of next) {
-          if (now - sm.startedAt > 30000) {
-            // Save partial
-            if (sm.content) {
-              fetch("/api/openclaw/chat", {
-                method: "PUT",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                  runId,
-                  channelId,
-                  content: sm.content,
-                  sessionKey: sm.sessionKey,
-                  agentId: sm.agentId,
-                  agentName: sm.agentName,
-                  status: "interrupted",
-                } satisfies ChatCompleteRequest),
-              }).then(() => mutateHistory())
-                .catch(() => {});
-            }
-            activeRunIds.current.delete(runId);
-            next.delete(runId);
-            changed = true;
-          }
-        }
-        return changed ? next : prev;
-      });
-    }, 30000);
+    if (streamingMessages.size === 0) return;
 
-    return () => clearTimeout(timer);
-  }, [streamingMessages, channelId, mutateHistory, updateStreaming]);
+    const HEARTBEAT_TIMEOUT_MS = 60_000;
+    const CHECK_INTERVAL_MS = 10_000;
+
+    const interval = setInterval(() => {
+      const timeSinceLastEvent = Date.now() - getLastEventTimestamp();
+      if (timeSinceLastEvent < HEARTBEAT_TIMEOUT_MS) return;
+
+      console.warn(`[useChat] SSE heartbeat timeout — no events for ${Math.round(timeSinceLastEvent / 1000)}s, interrupting ${streamingMessages.size} active run(s)`);
+
+      // SSE connection appears dead — mark all active runs as interrupted
+      updateStreaming((prev) => {
+        if (prev.size === 0) return prev;
+        const next = new Map(prev);
+        for (const [runId, sm] of next) {
+          if (sm.content) {
+            fetch("/api/openclaw/chat", {
+              method: "PUT",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                runId,
+                channelId,
+                content: sm.content,
+                sessionKey: sm.sessionKey,
+                agentId: sm.agentId,
+                agentName: sm.agentName,
+                status: "interrupted",
+              } satisfies ChatCompleteRequest),
+            }).then(() => mutateHistory())
+              .catch(() => {});
+          }
+          activeRunIds.current.delete(runId);
+          next.delete(runId);
+        }
+        return next;
+      });
+    }, CHECK_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [streamingMessages.size, channelId, mutateHistory, updateStreaming]);
 
   // ---------------------------------------------------------------------------
   // Send message
@@ -663,6 +638,8 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
           throw new Error(`Invalid response from server: ${(parseErr as Error).message}`);
         }
 
+        console.log(`[useChat] Send OK — runId=${result.runId} channel=${channelId}`);
+
         // Update session key
         if (result.sessionKey) {
           setCurrentSessionKey(result.sessionKey);
@@ -695,6 +672,7 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
           return next;
         });
       } catch (err) {
+        console.error(`[useChat] Send FAILED — channel=${channelId}:`, (err as Error).message);
         setSendError((err as Error).message);
       } finally {
         setSending(false);

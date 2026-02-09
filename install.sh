@@ -569,8 +569,27 @@ install_castle() {
         echo -e "${WARN}→${NC} Installing Castle (${INFO}${CASTLE_VERSION}${NC})..."
     fi
 
-    if ! npm --loglevel "$NPM_LOGLEVEL" ${NPM_SILENT_FLAG:+$NPM_SILENT_FLAG} --no-fund --no-audit install -g "$install_spec"; then
+    # Run npm install in background with a spinner so the user knows it's working
+    local npm_log
+    npm_log="$(mktempfile)"
+    npm --loglevel "$NPM_LOGLEVEL" ${NPM_SILENT_FLAG:+$NPM_SILENT_FLAG} --no-fund --no-audit install -g "$install_spec" > "$npm_log" 2>&1 &
+    local npm_pid=$!
+
+    local spin_chars='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏'
+    local i=0
+    while kill -0 "$npm_pid" 2>/dev/null; do
+        local c="${spin_chars:i%${#spin_chars}:1}"
+        printf "\r  ${ACCENT}%s${NC} Installing..." "$c"
+        ((i++)) || true
+        sleep 0.1
+    done
+    printf "\r                          \r"
+
+    wait "$npm_pid"
+    local npm_exit=$?
+    if [[ "$npm_exit" -ne 0 ]]; then
         echo -e "${ERROR}npm install failed${NC}"
+        cat "$npm_log"
         echo -e "Try: ${INFO}npm install -g --force ${install_spec}${NC}"
         exit 1
     fi

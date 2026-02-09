@@ -1,16 +1,19 @@
 "use client";
 
-import { use, useState, useEffect } from "react";
+import { use, useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
-import { WifiOff, X, AlertCircle } from "lucide-react";
+import { WifiOff, X, AlertCircle, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useOpenClaw } from "@/lib/hooks/use-openclaw";
 import { useChat } from "@/lib/hooks/use-chat";
 import { useSessionStats } from "@/lib/hooks/use-session-stats";
+import { useCompactionEvents } from "@/lib/hooks/use-compaction-events";
+import { useContextBoundary } from "@/lib/hooks/use-context-boundary";
 import { useUserSettings } from "@/lib/hooks/use-user-settings";
 import { MessageList } from "@/components/chat/message-list";
 import { ChatInput } from "@/components/chat/chat-input";
-import { SessionStatsPanel } from "@/components/chat/session-stats-panel";
+import { SessionStatsIndicator } from "@/components/chat/session-stats-panel";
+import { SearchTrigger } from "@/components/providers/search-provider";
 import { ChatErrorBoundary } from "./error-boundary";
 import type { AgentInfo } from "@/components/chat/agent-mention-popup";
 
@@ -62,7 +65,7 @@ function ChatSkeleton() {
       </div>
 
       {/* Messages skeleton */}
-      <div className="flex-1 overflow-hidden py-[20px] pr-[20px]">
+      <div className="flex-1 overflow-hidden py-[20px] pr-[20px] flex flex-col justify-end">
         <div className="flex flex-col gap-6">
           <SkeletonMessage lines={3} offset={0} />
           <SkeletonMessage lines={1} short offset={3} />
@@ -184,9 +187,30 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
     clearSendError,
   } = useChat({ channelId, defaultAgentId, anchorMessageId: highlightMessageId });
 
-  const { stats, isLoading: statsLoading } = useSessionStats({
+  const { stats, isLoading: statsLoading, refresh: refreshStats } = useSessionStats({
     sessionKey: currentSessionKey,
   });
+
+  const { boundaryMessageId, refresh: refreshBoundary } = useContextBoundary({
+    sessionKey: currentSessionKey,
+    channelId,
+  });
+
+  const { isCompacting, showBanner: showCompactionBanner, dismissBanner, compactionCount: liveCompactionCount } = useCompactionEvents({
+    sessionKey: currentSessionKey,
+    onCompactionComplete: () => {
+      refreshStats();
+      refreshBoundary();
+    },
+  });
+
+  // Ref to the navigate-between-messages function exposed by MessageList
+  const navigateRef = useRef<((direction: "up" | "down") => void) | null>(null);
+
+  // Handle Shift+ArrowUp/Down to navigate between messages
+  const handleNavigate = useCallback((direction: "up" | "down") => {
+    navigateRef.current?.(direction);
+  }, []);
 
   // Don't render until channel name, agents, and user settings have all loaded.
   const channelReady = channelName !== null && !agentsLoading && !userSettingsLoading;
@@ -201,33 +225,71 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
   }
 
   return (
-    <div className={cn("flex-1 flex flex-col h-full overflow-hidden transition-opacity duration-150", channelReady ? "opacity-100" : "opacity-0")}>
-      {/* Channel header — sticky */}
-      <div className="pb-4 border-b border-border flex items-center justify-between shrink-0 min-h-[83px]">
-        <div>
-          <h2 className="text-lg font-semibold text-foreground">
-            {channelName}
-            {channelArchived && (
-              <span className="ml-2 text-sm font-normal text-foreground-secondary">(Archived)</span>
+    <div className="flex-1 flex flex-col h-full overflow-hidden">
+      {/* Channel header — always visible, never fades */}
+      <div className="pt-[7px] pb-[30px] border-b border-border shrink-0">
+        <div className="flex items-center justify-between gap-4">
+          {/* Left: channel name + participants */}
+          <div className="min-w-0 min-h-[45px]">
+            {channelName ? (
+              <>
+                <h2 className="text-lg font-semibold text-foreground leading-tight">
+                  {channelName}
+                  {channelArchived && (
+                    <span className="ml-2 text-sm font-normal text-foreground-secondary">(Archived)</span>
+                  )}
+                </h2>
+                {(displayName || channelAgentIds.length > 0) && agents.length > 0 && (
+                  <p className="text-sm text-foreground-secondary mt-0.5">
+                    with{" "}
+                    {(() => {
+                      const names = [
+                        displayName,
+                        ...channelAgentIds.map(
+                          (id) => agents.find((a) => a.id === id)?.name || id
+                        ),
+                      ].filter(Boolean);
+                      if (names.length <= 2) return names.join(" & ");
+                      return names.slice(0, -1).join(", ") + " & " + names[names.length - 1];
+                    })()}
+                  </p>
+                )}
+              </>
+            ) : (
+              <>
+                <div className="skeleton h-5 w-40 rounded mb-1.5" />
+                <div className="skeleton h-3.5 w-28 rounded" />
+              </>
             )}
-          </h2>
-          {(displayName || channelAgentIds.length > 0) && agents.length > 0 && (
-            <p className="text-sm text-foreground-secondary mt-0.5">
-              with{" "}
-              {(() => {
-                const names = [
-                  displayName,
-                  ...channelAgentIds.map(
-                    (id) => agents.find((a) => a.id === id)?.name || id
-                  ),
-                ].filter(Boolean);
-                if (names.length <= 2) return names.join(" & ");
-                return names.slice(0, -1).join(", ") + " & " + names[names.length - 1];
-              })()}
-            </p>
-          )}
+          </div>
+          {/* Right: session stats + search */}
+          <div className="flex items-center gap-5 shrink-0">
+            <SessionStatsIndicator
+              stats={stats}
+              isLoading={statsLoading}
+              isCompacting={isCompacting}
+              liveCompactionCount={liveCompactionCount}
+            />
+            <SearchTrigger />
+          </div>
         </div>
       </div>
+
+      {/* Content area */}
+      {!channelReady ? (
+        /* Skeleton messages while loading */
+        <div className="flex-1 overflow-hidden py-[20px] pr-[20px] flex flex-col justify-end">
+          <div className="flex flex-col gap-6">
+            <SkeletonMessage lines={3} offset={0} />
+            <SkeletonMessage lines={1} short offset={3} />
+            <SkeletonMessage lines={2} offset={4} />
+            <SkeletonMessage lines={1} short offset={6} />
+            <SkeletonMessage lines={2} offset={7} />
+            <SkeletonMessage lines={3} offset={1} />
+          </div>
+        </div>
+      ) : (
+      <div className="flex-1 flex flex-col overflow-hidden">
 
       {/* Connection warning banner — sticky */}
       {!isConnected && !gatewayLoading && (
@@ -237,10 +299,21 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
         </div>
       )}
 
-      {/* Session stats — sticky */}
-      <div className="shrink-0">
-        <SessionStatsPanel stats={stats} isLoading={statsLoading} />
-      </div>
+      {/* Compaction banner */}
+      {showCompactionBanner && (
+        <div className="px-4 py-2 bg-yellow-500/10 border-b border-yellow-500/20 flex items-center justify-between text-sm text-yellow-600 dark:text-yellow-400 shrink-0">
+          <div className="flex items-center gap-2">
+            <Zap className="h-4 w-4" />
+            <span>Context compacted — older messages have been summarized</span>
+          </div>
+          <button
+            onClick={dismissBanner}
+            className="p-1 hover:bg-yellow-500/20 rounded"
+          >
+            <X className="h-3 w-3" />
+          </button>
+        </div>
+      )}
 
       {/* Messages — this is the ONLY scrollable area */}
       <MessageList
@@ -259,6 +332,9 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
         channelName={channelName}
         channelCreatedAt={channelCreatedAt}
         highlightMessageId={highlightMessageId}
+        navigateRef={navigateRef}
+        compactionBoundaryMessageId={boundaryMessageId}
+        compactionCount={stats?.compactions ?? 0}
       />
 
       {/* Error toast — sticky above input */}
@@ -277,17 +353,21 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
         </div>
       )}
 
-      {/* Input — sticky at bottom */}
+      </div>
+      )}
+
+      {/* Input — always visible, disabled until channel is ready */}
       <div className="shrink-0">
         <ChatInput
           onSend={sendMessage}
           onAbort={abortResponse}
           sending={sending}
           streaming={isStreaming}
-          disabled={!isConnected && !gatewayLoading}
+          disabled={!channelReady || (!isConnected && !gatewayLoading)}
           agents={chatAgents}
           defaultAgentId={defaultAgentId}
           channelId={channelId}
+          onNavigate={handleNavigate}
         />
       </div>
     </div>

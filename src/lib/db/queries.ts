@@ -138,16 +138,12 @@ export function deleteChannel(id: string): boolean {
   type DrizzleDb = { session: { client: SqliteClient } };
   const sqlite = (db as unknown as DrizzleDb).session.client;
 
-  // The FTS5 delete trigger can fail with "SQL logic error" if the FTS5 index
-  // is out of sync with the messages table. To avoid this:
-  // 1. Drop the FTS5 delete trigger
-  // 2. Delete all dependent records and the channel
-  // 3. Recreate the trigger
-  // 4. Rebuild the FTS5 index to stay in sync
-  sqlite.exec("DROP TRIGGER IF EXISTS messages_fts_delete");
+  // Delete dependent records: attachments/reactions → messages → sessions → agents → channel.
+  // The FTS5 delete trigger fires for each message deletion to keep FTS in sync.
+  // If the trigger fails (FTS out of sync), we catch and rebuild FTS afterwards.
+  let needsFtsRebuild = false;
 
   try {
-    // Delete dependent records: attachments/reactions → messages → sessions → agents → channel
     const msgIds = db
       .select({ id: messages.id })
       .from(messages)
@@ -164,21 +160,36 @@ export function deleteChannel(id: string): boolean {
         .run();
     }
 
-    db.delete(messages).where(eq(messages.channelId, id)).run();
+    try {
+      db.delete(messages).where(eq(messages.channelId, id)).run();
+    } catch (err) {
+      // FTS trigger failed — likely FTS out of sync. Delete messages without trigger,
+      // then rebuild FTS from scratch.
+      console.warn("[deleteChannel] FTS trigger failed during message deletion, will rebuild:", (err as Error).message);
+      sqlite.exec("DROP TRIGGER IF EXISTS messages_fts_delete");
+      db.delete(messages).where(eq(messages.channelId, id)).run();
+      needsFtsRebuild = true;
+    }
+
     db.delete(sessions).where(eq(sessions.channelId, id)).run();
     db.delete(channelAgents).where(eq(channelAgents.channelId, id)).run();
 
     const result = db.delete(channels).where(eq(channels.id, id)).run();
     return result.changes > 0;
   } finally {
-    // Always recreate the trigger and rebuild FTS5 index
-    sqlite.exec(`
-      CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
-        INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', OLD.rowid, OLD.content);
-      END;
-    `);
-    // Rebuild FTS5 to stay in sync after bulk deletion
-    sqlite.exec("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')");
+    if (needsFtsRebuild) {
+      // Recreate the trigger and fully resync FTS from the messages table
+      sqlite.exec(`
+        CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', OLD.rowid, OLD.content);
+        END;
+      `);
+      sqlite.exec("DELETE FROM messages_fts");
+      sqlite.exec(
+        "INSERT INTO messages_fts(rowid, content) SELECT rowid, content FROM messages"
+      );
+      console.log("[deleteChannel] FTS5 index rebuilt successfully.");
+    }
   }
 }
 
@@ -253,24 +264,48 @@ export function createMessage(params: {
   const id = uuid();
   const now = Date.now();
 
-  db.insert(messages)
-    .values({
-      id,
-      channelId: params.channelId,
-      sessionId: params.sessionId ?? null,
-      senderType: params.senderType,
-      senderId: params.senderId,
-      senderName: params.senderName ?? null,
-      content: params.content,
-      status: params.status ?? "complete",
-      mentionedAgentId: params.mentionedAgentId ?? null,
-      runId: params.runId ?? null,
-      sessionKey: params.sessionKey ?? null,
-      inputTokens: params.inputTokens ?? null,
-      outputTokens: params.outputTokens ?? null,
-      createdAt: now,
-    })
-    .run();
+  const insertValues = {
+    id,
+    channelId: params.channelId,
+    sessionId: params.sessionId ?? null,
+    senderType: params.senderType,
+    senderId: params.senderId,
+    senderName: params.senderName ?? null,
+    content: params.content,
+    status: params.status ?? "complete",
+    mentionedAgentId: params.mentionedAgentId ?? null,
+    runId: params.runId ?? null,
+    sessionKey: params.sessionKey ?? null,
+    inputTokens: params.inputTokens ?? null,
+    outputTokens: params.outputTokens ?? null,
+    createdAt: now,
+  };
+
+  try {
+    db.insert(messages).values(insertValues).run();
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+
+    // FTS5 trigger can fail with SQLITE_CONSTRAINT_PRIMARYKEY if the FTS index
+    // has orphaned entries from a previous bug. Auto-repair: rebuild FTS and retry.
+    if (code === "SQLITE_CONSTRAINT_PRIMARYKEY") {
+      console.warn(
+        `[createMessage] FTS constraint error — rebuilding FTS index and retrying (id=${id}, channelId=${params.channelId})`
+      );
+      type SqliteClient = { exec: (sql: string) => void };
+      type DrizzleDb = { session: { client: SqliteClient } };
+      const sqlite = (db as unknown as DrizzleDb).session.client;
+      sqlite.exec("DELETE FROM messages_fts");
+      sqlite.exec(
+        "INSERT INTO messages_fts(rowid, content) SELECT rowid, content FROM messages"
+      );
+      // Retry the insert — FTS is now clean
+      db.insert(messages).values(insertValues).run();
+      console.log("[createMessage] Retry succeeded after FTS rebuild.");
+    } else {
+      throw err;
+    }
+  }
 
   return {
     id,
@@ -304,18 +339,69 @@ export function updateMessage(
   }
 ): boolean {
   const db = getDb();
-  const result = db
-    .update(messages)
-    .set(updates)
-    .where(eq(messages.id, id))
-    .run();
-  return result.changes > 0;
+  try {
+    const result = db
+      .update(messages)
+      .set(updates)
+      .where(eq(messages.id, id))
+      .run();
+    return result.changes > 0;
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    // FTS5 update trigger can fail if the index is out of sync.
+    // Auto-repair: drop trigger, update, rebuild FTS, recreate trigger.
+    if (code === "SQLITE_ERROR" && updates.content !== undefined) {
+      console.warn(`[DB] updateMessage FTS error — dropping trigger, retrying, rebuilding (id=${id})`);
+      type SqliteClient = { exec: (sql: string) => void };
+      type DrizzleDb = { session: { client: SqliteClient } };
+      const sqlite = (db as unknown as DrizzleDb).session.client;
+      sqlite.exec("DROP TRIGGER IF EXISTS messages_fts_update");
+      const result = db.update(messages).set(updates).where(eq(messages.id, id)).run();
+      sqlite.exec(`
+        CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE OF content ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', OLD.rowid, OLD.content);
+          INSERT INTO messages_fts(rowid, content) VALUES (NEW.rowid, NEW.content);
+        END;
+      `);
+      sqlite.exec("DELETE FROM messages_fts");
+      sqlite.exec("INSERT INTO messages_fts(rowid, content) SELECT rowid, content FROM messages");
+      console.log("[DB] updateMessage retry succeeded after FTS rebuild.");
+      return result.changes > 0;
+    }
+    console.error(`[DB] updateMessage FAILED — id=${id} keys=${Object.keys(updates).join(",")}:`, (err as Error).message);
+    throw err;
+  }
 }
 
 export function deleteMessage(id: string): boolean {
   const db = getDb();
-  const result = db.delete(messages).where(eq(messages.id, id)).run();
-  return result.changes > 0;
+  try {
+    const result = db.delete(messages).where(eq(messages.id, id)).run();
+    return result.changes > 0;
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    // FTS5 delete trigger can fail if the index is out of sync.
+    // Auto-repair: drop trigger, delete, rebuild FTS, recreate trigger.
+    if (code === "SQLITE_ERROR") {
+      console.warn(`[DB] deleteMessage FTS error — dropping trigger, retrying, rebuilding (id=${id})`);
+      type SqliteClient = { exec: (sql: string) => void };
+      type DrizzleDb = { session: { client: SqliteClient } };
+      const sqlite = (db as unknown as DrizzleDb).session.client;
+      sqlite.exec("DROP TRIGGER IF EXISTS messages_fts_delete");
+      const result = db.delete(messages).where(eq(messages.id, id)).run();
+      sqlite.exec(`
+        CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', OLD.rowid, OLD.content);
+        END;
+      `);
+      sqlite.exec("DELETE FROM messages_fts");
+      sqlite.exec("INSERT INTO messages_fts(rowid, content) SELECT rowid, content FROM messages");
+      console.log("[DB] deleteMessage retry succeeded after FTS rebuild.");
+      return result.changes > 0;
+    }
+    console.error(`[DB] deleteMessage FAILED — id=${id}:`, (err as Error).message);
+    throw err;
+  }
 }
 
 /**
@@ -556,14 +642,19 @@ export function createSession(params: {
   const id = uuid();
   const now = Date.now();
 
-  db.insert(sessions)
-    .values({
-      id,
-      channelId: params.channelId,
-      sessionKey: params.sessionKey ?? null,
-      startedAt: now,
-    })
-    .run();
+  try {
+    db.insert(sessions)
+      .values({
+        id,
+        channelId: params.channelId,
+        sessionKey: params.sessionKey ?? null,
+        startedAt: now,
+      })
+      .run();
+  } catch (err) {
+    console.error(`[DB] createSession FAILED — channelId=${params.channelId} sessionKey=${params.sessionKey}:`, (err as Error).message);
+    throw err;
+  }
 
   return {
     id,
@@ -626,6 +717,37 @@ export function getLatestSessionKey(channelId: string): string | null {
     .limit(1)
     .get();
   return row?.sessionKey ?? null;
+}
+
+/**
+ * Update the compaction boundary for a session (by session key).
+ * The boundary message ID is the oldest message still in the agent's context.
+ */
+export function setCompactionBoundary(
+  sessionKey: string,
+  boundaryMessageId: string
+): boolean {
+  const db = getDb();
+  const result = db
+    .update(sessions)
+    .set({ compactionBoundaryMessageId: boundaryMessageId })
+    .where(eq(sessions.sessionKey, sessionKey))
+    .run();
+  return result.changes > 0;
+}
+
+/**
+ * Get the compaction boundary message ID for a session (by session key).
+ */
+export function getCompactionBoundary(sessionKey: string): string | null {
+  const db = getDb();
+  const row = db
+    .select({ boundaryId: sessions.compactionBoundaryMessageId })
+    .from(sessions)
+    .where(eq(sessions.sessionKey, sessionKey))
+    .limit(1)
+    .get();
+  return row?.boundaryId ?? null;
 }
 
 // ============================================================================
@@ -779,27 +901,32 @@ export function searchMessages(
 
   let rows: Record<string, unknown>[];
 
-  if (channelId) {
-    const stmt = sqlite.prepare(`
-      SELECT m.*
-      FROM messages m
-      JOIN messages_fts fts ON m.rowid = fts.rowid
-      WHERE messages_fts MATCH ?
-        AND m.channel_id = ?
-      ORDER BY m.created_at DESC
-      LIMIT ?
-    `);
-    rows = stmt.all(sanitizedQuery, channelId, limit);
-  } else {
-    const stmt = sqlite.prepare(`
-      SELECT m.*
-      FROM messages m
-      JOIN messages_fts fts ON m.rowid = fts.rowid
-      WHERE messages_fts MATCH ?
-      ORDER BY m.created_at DESC
-      LIMIT ?
-    `);
-    rows = stmt.all(sanitizedQuery, limit);
+  try {
+    if (channelId) {
+      const stmt = sqlite.prepare(`
+        SELECT m.*
+        FROM messages m
+        JOIN messages_fts fts ON m.rowid = fts.rowid
+        WHERE messages_fts MATCH ?
+          AND m.channel_id = ?
+        ORDER BY m.created_at DESC
+        LIMIT ?
+      `);
+      rows = stmt.all(sanitizedQuery, channelId, limit);
+    } else {
+      const stmt = sqlite.prepare(`
+        SELECT m.*
+        FROM messages m
+        JOIN messages_fts fts ON m.rowid = fts.rowid
+        WHERE messages_fts MATCH ?
+        ORDER BY m.created_at DESC
+        LIMIT ?
+      `);
+      rows = stmt.all(sanitizedQuery, limit);
+    }
+  } catch (err) {
+    console.error(`[DB] searchMessages FTS FAILED — query="${sanitizedQuery}" channelId=${channelId}:`, (err as Error).message);
+    return [];
   }
 
   return rows.map((row) => ({

@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useCallback } from "react";
+import { useEffect, useCallback } from "react";
 import useSWR from "swr";
+import { subscribe, onError, type SSEEvent } from "@/lib/sse-singleton";
 
 // ============================================================================
 // Types
@@ -27,24 +28,24 @@ export interface OpenClawStatus {
   };
 }
 
-interface GatewaySSEEvent {
-  event: string;
-  payload?: unknown;
-  seq?: number;
-}
-
 // ============================================================================
 // Fetchers
 // ============================================================================
 
 const statusFetcher = async (url: string): Promise<OpenClawStatus> => {
   const res = await fetch(url, { method: "POST" });
+  if (!res.ok) {
+    console.warn(`[useOpenClaw] Status fetch returned ${res.status}`);
+  }
   return res.json();
 };
 
 const agentsFetcher = async (url: string): Promise<OpenClawAgent[]> => {
   const res = await fetch(url);
-  if (!res.ok) return [];
+  if (!res.ok) {
+    console.warn(`[useOpenClaw] Agents fetch failed: ${res.status}`);
+    return [];
+  }
   const data = await res.json();
   return data.agents || [];
 };
@@ -61,7 +62,6 @@ const agentsFetcher = async (url: string): Promise<OpenClawAgent[]> => {
  * SSE subscription pushes real-time updates that trigger SWR cache invalidation.
  */
 export function useOpenClaw() {
-  const eventSourceRef = useRef<EventSource | null>(null);
 
   // ---------------------------------------------------------------------------
   // SWR: Connection status
@@ -114,66 +114,53 @@ export function useOpenClaw() {
   const refreshAgents = useCallback(() => mutateAgents(), [mutateAgents]);
 
   // ---------------------------------------------------------------------------
-  // SSE subscription for real-time events
+  // SSE subscription for real-time events via shared singleton
   // ---------------------------------------------------------------------------
   useEffect(() => {
-    const es = new EventSource("/api/openclaw/events");
-    eventSourceRef.current = es;
+    const handleState = (evt: SSEEvent) => {
+      const payload = evt.payload as {
+        state: string;
+        isConnected: boolean;
+        server?: Record<string, unknown>;
+      };
 
-    es.onmessage = (e) => {
-      try {
-        const evt: GatewaySSEEvent = JSON.parse(e.data);
+      mutateStatus(
+        (prev) => ({
+          ok: payload.isConnected,
+          configured: prev?.configured ?? true,
+          state: payload.state,
+          server: payload.server as OpenClawStatus["server"],
+        }),
+        { revalidate: false }
+      );
 
-        // Handle Castle state changes — update status via SWR
-        if (evt.event === "castle.state") {
-          const payload = evt.payload as {
-            state: string;
-            isConnected: boolean;
-            server?: Record<string, unknown>;
-          };
-
-          // Optimistically update the SWR cache with the SSE data
-          mutateStatus(
-            (prev) => ({
-              ok: payload.isConnected,
-              configured: prev?.configured ?? true,
-              state: payload.state,
-              server: payload.server as OpenClawStatus["server"],
-            }),
-            { revalidate: false }
-          );
-
-          // Re-fetch agents when connection state changes to connected
-          if (payload.isConnected) {
-            mutateAgents();
-          }
-        }
-
-        // Handle agent-related events — re-fetch agent list
-        if (evt.event?.startsWith("agent.")) {
-          mutateAgents();
-        }
-
-        // Handle avatar update events
-        if (evt.event === "agentAvatarUpdated") {
-          mutateAgents();
-        }
-      } catch {
-        // Ignore parse errors
+      if (payload.isConnected) {
+        mutateAgents();
       }
     };
 
-    es.onerror = () => {
-      // EventSource auto-reconnects, but update state
+    const handleAgent = (_evt: SSEEvent) => {
+      mutateAgents();
+    };
+
+    const handleError = () => {
+      console.warn("[useOpenClaw] SSE error — marking as disconnected");
       mutateStatus(
         (prev) => prev ? { ...prev, ok: false, state: "disconnected" } : prev,
         { revalidate: false }
       );
     };
 
+    const unsub1 = subscribe("castle.state", handleState);
+    const unsub2 = subscribe("agent.*", handleAgent);
+    const unsub3 = subscribe("agentAvatarUpdated", handleAgent);
+    const unsub4 = onError(handleError);
+
     return () => {
-      es.close();
-      eventSourceRef.current = null;
+      unsub1();
+      unsub2();
+      unsub3();
+      unsub4();
     };
   }, [mutateStatus, mutateAgents]);
 
