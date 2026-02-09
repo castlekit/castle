@@ -159,16 +159,22 @@ jobs:
           pip install zizmor
           zizmor --config zizmor.yml .github/workflows/
 
-      - name: Check version bump
+      - name: Check version bump and changelog
         if: github.event_name == 'pull_request'
         run: |
-          # Skip version bump check if only CI/docs/config files changed
+          # Skip checks if only CI/docs/config files changed
           CHANGED=$(git diff --name-only origin/main...HEAD)
           CODE_CHANGED=$(echo "$CHANGED" | grep -v '^\.github/' | grep -v '^LICENSE' | grep -v '^CONTRIBUTING\.md' | grep -v '^SECURITY\.md' | grep -v '^CHANGELOG\.md' | grep -v '^\.gitattributes$' | grep -v '^\.gitignore$' | grep -v '^\.detect-secrets' | grep -v '^\.pre-commit' | grep -v '^\.secrets\.baseline$' | grep -v '^zizmor\.yml$' | grep -v '^\.github/.*\.md$' || true)
 
           if [ -z "$CODE_CHANGED" ]; then
-            echo "Only CI/docs files changed — skipping version bump check."
+            echo "Only CI/docs files changed — skipping version bump and changelog checks."
             exit 0
+          fi
+
+          # Check CHANGELOG.md was updated
+          if ! echo "$CHANGED" | grep -q '^CHANGELOG\.md$'; then
+            echo "::error::CHANGELOG.md has not been updated. Please add an entry for this release."
+            exit 1
           fi
 
           MAIN_VERSION=$(git show origin/main:package.json | node -e "process.stdin.setEncoding('utf8');let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).version))")
@@ -240,80 +246,4 @@ jobs:
           else
             npm publish --access public --provenance
             echo "Published @castlekit/castle@$VERSION"
-          fi
-
-      - name: Update changelog
-        run: |
-          # Auto-generate CHANGELOG.md from git tags and commit messages
-          cat > CHANGELOG.md << 'HEADER'
-          # Changelog
-
-          All notable changes to Castle are documented here.
-          This file is auto-generated from git history on each release.
-
-          HEADER
-
-          # Trim leading whitespace from heredoc
-          sed -i 's/^          //' CHANGELOG.md
-
-          TAGS=$(git tag --sort=-version:refname)
-          PREV=""
-          for TAG in $TAGS; do
-            DATE=$(git log -1 --format='%as' "$TAG")
-            VERSION="${TAG#v}"
-            echo "" >> CHANGELOG.md
-            echo "## $VERSION ($DATE)" >> CHANGELOG.md
-
-            if [ -n "$PREV" ]; then
-              RANGE="$TAG..$PREV"
-            else
-              # Most recent tag — include commits from tag to HEAD
-              RANGE="$TAG..HEAD"
-            fi
-            PREV="$TAG"
-
-            # Categorize commits
-            ADDED=""
-            FIXED=""
-            CHANGED=""
-
-            while IFS= read -r line; do
-              msg="${line#* }"
-              case "$msg" in
-                Add*|Implement*|"Full "*|"Chat V1"*|"Phase 1"*|"Universal Search"*)
-                  ADDED="$ADDED\n- $msg" ;;
-                Fix*|"FTS5 "*|Recover*)
-                  FIXED="$FIXED\n- $msg" ;;
-                Bump*|Merge*) ;;
-                *)
-                  CHANGED="$CHANGED\n- $msg" ;;
-              esac
-            done <<< "$(git log --oneline "$RANGE" 2>/dev/null || git log --oneline "$TAG")"
-
-            if [ -n "$ADDED" ]; then
-              echo "" >> CHANGELOG.md
-              echo "### Added" >> CHANGELOG.md
-              echo -e "$ADDED" >> CHANGELOG.md
-            fi
-            if [ -n "$FIXED" ]; then
-              echo "" >> CHANGELOG.md
-              echo "### Fixed" >> CHANGELOG.md
-              echo -e "$FIXED" >> CHANGELOG.md
-            fi
-            if [ -n "$CHANGED" ]; then
-              echo "" >> CHANGELOG.md
-              echo "### Changed" >> CHANGELOG.md
-              echo -e "$CHANGED" >> CHANGELOG.md
-            fi
-          done
-
-          # Commit updated changelog back to main
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          if git diff --cached --quiet; then
-            echo "No changelog changes to commit."
-          else
-            git commit -m "docs: update CHANGELOG.md [skip ci]"
-            git push origin main
           fi
