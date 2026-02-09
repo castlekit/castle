@@ -45,3 +45,4 @@ CASTLE_DESIGN_SYSTEM_FULL.md
 # python virtual environment (for detect-secrets, pre-commit)
 .venv/
 
+*.tgz

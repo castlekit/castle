@@ -22,6 +22,7 @@ All notable changes to Castle are documented here.
 
 - **"Build failed" during global install** — root cause was `npm run build` executing inside the read-only global `node_modules` directory without `devDependencies`. Now skipped entirely for pre-built packages.
 - **Cross-platform native module crash** — standalone bundle no longer ships `node_modules/` (which contained platform-specific binaries like `better-sqlite3` from the build machine). Instead, `NODE_PATH` resolves packages from the npm-installed `node_modules/` with correct platform binaries.
+- **Server bound to all interfaces** — standalone server now binds to `127.0.0.1` (localhost only) instead of `0.0.0.0`, ensuring Castle is not accessible from other machines on the network
 
 ## 0.3.2 (2026-02-09)
 

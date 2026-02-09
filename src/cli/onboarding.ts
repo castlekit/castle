@@ -610,7 +610,7 @@ export async function runOnboarding(): Promise<void> {
   };
   if (serverScript) {
     serverEnv.PORT = String(config.server?.port || 3333);
-    serverEnv.HOSTNAME = "0.0.0.0";
+    serverEnv.HOSTNAME = "127.0.0.1";
     serverEnv.NODE_PATH = join(PROJECT_ROOT, "node_modules");
   }
 
