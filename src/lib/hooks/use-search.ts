@@ -8,30 +8,6 @@ import type { SearchResult } from "@/lib/types/search";
 // ============================================================================
 
 const DEBOUNCE_MS = 300;
-const MAX_RECENT = 8;
-const STORAGE_KEY = "castle:recent-searches";
-
-// ============================================================================
-// LocalStorage helpers
-// ============================================================================
-
-function loadRecentSearches(): string[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveRecentSearches(searches: string[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(searches));
-  } catch {
-    // Silent — localStorage might be full or unavailable
-  }
-}
 
 // ============================================================================
 // Hook
@@ -41,9 +17,20 @@ export function useSearch() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
-  const [recentSearches, setRecentSearches] = useState<string[]>(loadRecentSearches);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const recentLoaded = useRef(false);
+
+  // Load recent searches from DB on first mount
+  useEffect(() => {
+    if (recentLoaded.current) return;
+    recentLoaded.current = true;
+    fetch("/api/openclaw/chat/search?recent=1")
+      .then((res) => (res.ok ? res.json() : { recent: [] }))
+      .then((data) => setRecentSearches(data.recent ?? []))
+      .catch(() => {});
+  }, []);
 
   // Debounced search
   const search = useCallback((q: string) => {
@@ -74,15 +61,22 @@ export function useSearch() {
           const searchResults: SearchResult[] = data.results ?? [];
           setResults(searchResults);
 
-          // Save to recent if results found
+          // Save to recent searches in DB if results found
           if (searchResults.length > 0) {
-            setRecentSearches((prev) => {
-              const trimmed = q.trim();
-              const filtered = prev.filter((s) => s !== trimmed);
-              const next = [trimmed, ...filtered].slice(0, MAX_RECENT);
-              saveRecentSearches(next);
-              return next;
-            });
+            const trimmed = q.trim();
+            fetch("/api/openclaw/chat/search", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ query: trimmed }),
+            })
+              .then(() => {
+                // Update local state to reflect the save
+                setRecentSearches((prev) => {
+                  const filtered = prev.filter((s) => s !== trimmed);
+                  return [trimmed, ...filtered].slice(0, 15);
+                });
+              })
+              .catch(() => {});
           }
         }
       } catch (err) {
@@ -97,7 +91,7 @@ export function useSearch() {
 
   const clearRecentSearches = useCallback(() => {
     setRecentSearches([]);
-    saveRecentSearches([]);
+    fetch("/api/openclaw/chat/search", { method: "DELETE" }).catch(() => {});
   }, []);
 
   // Cleanup on unmount

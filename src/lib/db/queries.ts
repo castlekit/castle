@@ -8,6 +8,7 @@ import {
   messages,
   messageAttachments,
   messageReactions,
+  recentSearches,
   settings,
   agentStatuses,
 } from "./schema";
@@ -961,4 +962,56 @@ export function setAgentStatus(agentId: string, status: AgentStatusValue): void 
       .values({ agentId, status, updatedAt: now })
       .run();
   }
+}
+
+// ============================================================================
+// Recent Searches
+// ============================================================================
+
+const MAX_RECENT_SEARCHES = 15;
+
+export function getRecentSearches(): string[] {
+  const db = getDb();
+  const rows = db
+    .select({ query: recentSearches.query })
+    .from(recentSearches)
+    .orderBy(desc(recentSearches.createdAt))
+    .limit(MAX_RECENT_SEARCHES)
+    .all();
+  return rows.map((r) => r.query);
+}
+
+export function addRecentSearch(query: string): void {
+  const db = getDb();
+  const trimmed = query.trim();
+  if (!trimmed) return;
+
+  // Remove duplicate if it already exists
+  db.delete(recentSearches)
+    .where(eq(recentSearches.query, trimmed))
+    .run();
+
+  // Insert as most recent
+  db.insert(recentSearches)
+    .values({ query: trimmed, createdAt: Date.now() })
+    .run();
+
+  // Prune old entries beyond the limit
+  const all = db
+    .select({ id: recentSearches.id })
+    .from(recentSearches)
+    .orderBy(desc(recentSearches.createdAt))
+    .all();
+
+  if (all.length > MAX_RECENT_SEARCHES) {
+    const toDelete = all.slice(MAX_RECENT_SEARCHES).map((r) => r.id);
+    db.delete(recentSearches)
+      .where(inArray(recentSearches.id, toDelete))
+      .run();
+  }
+}
+
+export function clearRecentSearches(): void {
+  const db = getDb();
+  db.delete(recentSearches).run();
 }

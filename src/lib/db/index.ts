@@ -25,7 +25,7 @@ const MAX_BACKUPS = 5;
 const CHECKPOINT_INTERVAL_MS = 5 * 60 * 1000;
 
 /** Current schema version — bump when adding new migrations */
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 // ============================================================================
 // Singleton
@@ -389,6 +389,12 @@ const TABLE_SQL = `
   );
   CREATE INDEX IF NOT EXISTS idx_attachments_message ON message_attachments(message_id);
 
+  CREATE TABLE IF NOT EXISTS recent_searches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    query TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+
   CREATE TABLE IF NOT EXISTS message_reactions (
     id TEXT PRIMARY KEY,
     message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
@@ -463,6 +469,21 @@ function runMigrations(
         agent_id TEXT PRIMARY KEY,
         status TEXT NOT NULL DEFAULT 'idle',
         updated_at INTEGER NOT NULL
+      )
+    `);
+  }
+
+  // --- Migration 5: Create recent_searches table ---
+  const recentSearchesTable = sqlite
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='recent_searches'")
+    .get() as { name: string } | undefined;
+  if (!recentSearchesTable) {
+    console.log("[Castle DB] Migration: creating recent_searches table");
+    sqlite.exec(`
+      CREATE TABLE IF NOT EXISTS recent_searches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        query TEXT NOT NULL,
+        created_at INTEGER NOT NULL
       )
     `);
   }

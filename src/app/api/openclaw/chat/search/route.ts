@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { sanitizeForApi, checkRateLimit, rateLimitKey } from "@/lib/api-security";
-import { searchMessages, getChannels } from "@/lib/db/queries";
+import { sanitizeForApi, checkRateLimit, rateLimitKey, checkCsrf } from "@/lib/api-security";
+import { searchMessages, getChannels, getRecentSearches, addRecentSearch, clearRecentSearches } from "@/lib/db/queries";
 import type { MessageSearchResult, SearchResult } from "@/lib/types/search";
 
 const MAX_QUERY_LENGTH = 500;
@@ -15,6 +15,18 @@ export async function GET(request: NextRequest) {
   if (rl) return rl;
 
   const { searchParams } = new URL(request.url);
+
+  // GET /api/openclaw/chat/search?recent=1 — return recent searches
+  if (searchParams.get("recent") === "1") {
+    try {
+      const recent = getRecentSearches();
+      return NextResponse.json({ recent });
+    } catch (err) {
+      console.error("[Chat Search] Recent failed:", (err as Error).message);
+      return NextResponse.json({ recent: [] });
+    }
+  }
+
   const q = searchParams.get("q");
   const limit = Math.min(parseInt(searchParams.get("limit") || "30", 10), 100);
 
@@ -84,6 +96,51 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ results });
   } catch (err) {
     console.error("[Chat Search] Failed:", (err as Error).message);
+    return NextResponse.json(
+      { error: sanitizeForApi((err as Error).message) },
+      { status: 500 }
+    );
+  }
+}
+
+// ============================================================================
+// POST /api/openclaw/chat/search — Save a recent search
+// ============================================================================
+
+export async function POST(request: NextRequest) {
+  const csrf = checkCsrf(request);
+  if (csrf) return csrf;
+
+  try {
+    const body = await request.json();
+    const q = body.query;
+    if (!q || typeof q !== "string" || !q.trim()) {
+      return NextResponse.json({ error: "query is required" }, { status: 400 });
+    }
+    addRecentSearch(q.trim());
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("[Chat Search] Save recent failed:", (err as Error).message);
+    return NextResponse.json(
+      { error: sanitizeForApi((err as Error).message) },
+      { status: 500 }
+    );
+  }
+}
+
+// ============================================================================
+// DELETE /api/openclaw/chat/search — Clear all recent searches
+// ============================================================================
+
+export async function DELETE(request: NextRequest) {
+  const csrf = checkCsrf(request);
+  if (csrf) return csrf;
+
+  try {
+    clearRecentSearches();
+    return NextResponse.json({ ok: true });
+  } catch (err) {
+    console.error("[Chat Search] Clear recent failed:", (err as Error).message);
     return NextResponse.json(
       { error: sanitizeForApi((err as Error).message) },
       { status: 500 }

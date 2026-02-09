@@ -129,6 +129,16 @@ export const messageAttachments = sqliteTable(
 );
 
 // ============================================================================
+// recent_searches
+// ============================================================================
+
+export const recentSearches = sqliteTable("recent_searches", {
+  id: integer("id").primaryKey({ autoIncrement: true }),
+  query: text("query").notNull(),
+  createdAt: integer("created_at").notNull(), // unix ms
+});
+
+// ============================================================================
 // message_reactions
 // ============================================================================
 
