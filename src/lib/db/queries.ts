@@ -347,6 +347,27 @@ export function updateMessage(
       .run();
     return result.changes > 0;
   } catch (err) {
+    const code = (err as { code?: string }).code;
+    // FTS5 update trigger can fail if the index is out of sync.
+    // Auto-repair: drop trigger, update, rebuild FTS, recreate trigger.
+    if (code === "SQLITE_ERROR" && updates.content !== undefined) {
+      console.warn(`[DB] updateMessage FTS error — dropping trigger, retrying, rebuilding (id=${id})`);
+      type SqliteClient = { exec: (sql: string) => void };
+      type DrizzleDb = { session: { client: SqliteClient } };
+      const sqlite = (db as unknown as DrizzleDb).session.client;
+      sqlite.exec("DROP TRIGGER IF EXISTS messages_fts_update");
+      const result = db.update(messages).set(updates).where(eq(messages.id, id)).run();
+      sqlite.exec(`
+        CREATE TRIGGER IF NOT EXISTS messages_fts_update AFTER UPDATE OF content ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', OLD.rowid, OLD.content);
+          INSERT INTO messages_fts(rowid, content) VALUES (NEW.rowid, NEW.content);
+        END;
+      `);
+      sqlite.exec("DELETE FROM messages_fts");
+      sqlite.exec("INSERT INTO messages_fts(rowid, content) SELECT rowid, content FROM messages");
+      console.log("[DB] updateMessage retry succeeded after FTS rebuild.");
+      return result.changes > 0;
+    }
     console.error(`[DB] updateMessage FAILED — id=${id} keys=${Object.keys(updates).join(",")}:`, (err as Error).message);
     throw err;
   }
@@ -358,6 +379,26 @@ export function deleteMessage(id: string): boolean {
     const result = db.delete(messages).where(eq(messages.id, id)).run();
     return result.changes > 0;
   } catch (err) {
+    const code = (err as { code?: string }).code;
+    // FTS5 delete trigger can fail if the index is out of sync.
+    // Auto-repair: drop trigger, delete, rebuild FTS, recreate trigger.
+    if (code === "SQLITE_ERROR") {
+      console.warn(`[DB] deleteMessage FTS error — dropping trigger, retrying, rebuilding (id=${id})`);
+      type SqliteClient = { exec: (sql: string) => void };
+      type DrizzleDb = { session: { client: SqliteClient } };
+      const sqlite = (db as unknown as DrizzleDb).session.client;
+      sqlite.exec("DROP TRIGGER IF EXISTS messages_fts_delete");
+      const result = db.delete(messages).where(eq(messages.id, id)).run();
+      sqlite.exec(`
+        CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+          INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', OLD.rowid, OLD.content);
+        END;
+      `);
+      sqlite.exec("DELETE FROM messages_fts");
+      sqlite.exec("INSERT INTO messages_fts(rowid, content) SELECT rowid, content FROM messages");
+      console.log("[DB] deleteMessage retry succeeded after FTS rebuild.");
+      return result.changes > 0;
+    }
     console.error(`[DB] deleteMessage FAILED — id=${id}:`, (err as Error).message);
     throw err;
   }
