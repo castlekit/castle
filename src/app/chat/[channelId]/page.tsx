@@ -182,10 +182,12 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
   // Don't render until channel name, agents, and user settings have all loaded.
   const channelReady = channelName !== null && !agentsLoading && !userSettingsLoading;
 
-  // First load → skeleton. Channel switches → smooth opacity transition.
+  // First cold load → skeleton. If agents/user are already cached (e.g.
+  // navigated from dashboard) or we've rendered before, use opacity transition.
+  const dataAlreadyCached = !agentsLoading && !userSettingsLoading;
   if (channelReady) hasEverRendered = true;
 
-  if (!channelReady && !hasEverRendered) {
+  if (!channelReady && !hasEverRendered && !dataAlreadyCached) {
     return <ChatSkeleton />;
   }
 

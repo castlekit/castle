@@ -247,15 +247,7 @@ export function MessageList({
     return agent?.avatar;
   };
 
-  if (loading) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <Loader2 className="h-5 w-5 animate-spin text-foreground-secondary" />
-      </div>
-    );
-  }
-
-  if (messages.length === 0 && (!streamingMessages || streamingMessages.size === 0)) {
+  if (!loading && messages.length === 0 && (!streamingMessages || streamingMessages.size === 0)) {
     return (
       <div className="flex-1 flex items-center justify-center">
         <div className="flex flex-col items-center">

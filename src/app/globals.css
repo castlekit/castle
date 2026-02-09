@@ -270,7 +270,7 @@ img.emoji {
     @apply space-y-0.5;
   }
   .selectable-list-item {
-    @apply flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-surface-hover cursor-pointer text-sm;
+    @apply flex items-center gap-2.5 px-2 py-1.5 rounded-[var(--radius-sm)] hover:bg-surface-hover cursor-pointer text-sm;
   }
 
   /* Input base - shared input/select/textarea styles */

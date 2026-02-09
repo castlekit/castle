@@ -54,10 +54,15 @@ export function ChannelList({
 
   return (
     <div className={cn("flex flex-col gap-2", className)}>
-      {/* Loading */}
+      {/* Loading skeleton */}
       {loading && (
-        <div className="flex items-center justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-foreground-secondary" />
+        <div className="flex flex-col gap-1">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="flex items-center gap-1.5 px-2 h-[34px] rounded-[var(--radius-sm)]">
+              <div className="skeleton h-4 w-4 rounded shrink-0" />
+              <div className="skeleton h-3.5 rounded" style={{ width: `${50 + i * 12}%` }} />
+            </div>
+          ))}
         </div>
       )}
 
