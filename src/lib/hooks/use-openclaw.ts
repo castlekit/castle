@@ -117,6 +117,8 @@ export function useOpenClaw() {
   // SSE subscription for real-time events
   // ---------------------------------------------------------------------------
   useEffect(() => {
+    const esId = Math.random().toString(36).slice(2, 8);
+    console.warn(`[SSE-DIAG] Creating EventSource #${esId} (use-openclaw)`);
     const es = new EventSource("/api/openclaw/events");
     eventSourceRef.current = es;
 
@@ -172,6 +174,7 @@ export function useOpenClaw() {
     };
 
     return () => {
+      console.warn(`[SSE-DIAG] Cleanup ES #${esId} (use-openclaw): CLOSING`);
       es.close();
       eventSourceRef.current = null;
     };

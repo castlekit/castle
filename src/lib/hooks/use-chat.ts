@@ -378,12 +378,24 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
   // ---------------------------------------------------------------------------
   useEffect(() => {
     // Use the existing SSE endpoint that forwards all gateway events
+    const esId = Math.random().toString(36).slice(2, 8);
+    console.warn(`[SSE-DIAG] Creating EventSource #${esId} (use-chat)`);
     const es = new EventSource("/api/openclaw/events");
     eventSourceRef.current = es;
 
     es.onmessage = (e) => {
       try {
         const evt = JSON.parse(e.data);
+
+        // ── DIAGNOSTIC LOGGING (remove after debugging) ──────────────
+        if (evt.event === "chat") {
+          const d = evt.payload;
+          const textSnippet = (d?.text ?? d?.message?.content?.[0]?.text ?? "").slice(0, 80);
+          console.log(
+            `[SSE-DIAG] ES#${esId} event=chat runId=${d?.runId?.slice(0, 8)} state=${d?.state} seq=${d?.seq} textLen=${(d?.text ?? "").length} snippet="${textSnippet}" activeRuns=[${[...activeRunIds.current].map(r => r.slice(0, 8)).join(",")}]`
+          );
+        }
+        // ── END DIAGNOSTIC ───────────────────────────────────────────
 
         // Only handle chat events
         if (evt.event !== "chat") return;
@@ -427,7 +439,11 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
           }
         } else if (delta.state === "final") {
           // Guard: if we already processed this runId's final, skip
-          if (!activeRunIds.current.has(delta.runId)) return;
+          if (!activeRunIds.current.has(delta.runId)) {
+            console.warn(`[SSE-DIAG] FINAL event for runId=${delta.runId.slice(0, 8)} but NOT in activeRunIds — already timed out?`);
+            return;
+          }
+          console.log(`[SSE-DIAG] FINAL received for runId=${delta.runId.slice(0, 8)}, persisting...`);
           activeRunIds.current.delete(delta.runId);
 
           // Read accumulated content from the ref (always current, no stale closure)
@@ -557,6 +573,7 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
 
     return () => {
       if (activeRunIds.current.size > 0) {
+        console.warn(`[SSE-DIAG] Cleanup ES #${esId}: ORPHANING (${activeRunIds.current.size} active runs)`);
         // Agent is still processing — hand off the EventSource to the
         // module-level handler so "final" events still get persisted
         // even though the component is unmounting.
@@ -576,6 +593,7 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
         }
         orphanEventSource(es, runs);
       } else {
+        console.warn(`[SSE-DIAG] Cleanup ES #${esId}: CLOSING (no active runs)`);
         es.close();
       }
       eventSourceRef.current = null;
@@ -598,6 +616,7 @@ export function useChat({ channelId, defaultAgentId, anchorMessageId }: UseChatO
         let changed = false;
         for (const [runId, sm] of next) {
           if (now - sm.startedAt > 30000) {
+            console.warn(`[SSE-DIAG] 30s TIMEOUT fired for runId=${runId.slice(0, 8)} — elapsed=${now - sm.startedAt}ms, contentLen=${sm.content.length}, marking as INTERRUPTED`);
             // Save partial
             if (sm.content) {
               fetch("/api/openclaw/chat", {

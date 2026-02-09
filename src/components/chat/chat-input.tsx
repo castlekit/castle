@@ -16,6 +16,8 @@ interface ChatInputProps {
   defaultAgentId?: string;
   channelId?: string;
   className?: string;
+  /** Called when user presses Shift+ArrowUp/Down to navigate between messages */
+  onNavigate?: (direction: "up" | "down") => void;
 }
 
 export function ChatInput({
@@ -28,6 +30,7 @@ export function ChatInput({
   defaultAgentId,
   channelId,
   className,
+  onNavigate,
 }: ChatInputProps) {
   const [showMentions, setShowMentions] = useState(false);
   const [mentionFilter, setMentionFilter] = useState("");
@@ -218,6 +221,19 @@ export function ChatInput({
         }
       }
 
+      // Shift+ArrowUp/Down — navigate between messages
+      if (
+        (e.key === "ArrowUp" || e.key === "ArrowDown") &&
+        e.shiftKey &&
+        !e.ctrlKey &&
+        !e.metaKey &&
+        !e.altKey
+      ) {
+        e.preventDefault();
+        onNavigate?.(e.key === "ArrowUp" ? "up" : "down");
+        return;
+      }
+
       // Regular Enter to send
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
@@ -230,7 +246,7 @@ export function ChatInput({
         return;
       }
     },
-    [handleSubmit, showMentions, agents, mentionFilter, mentionHighlightIndex, insertMention]
+    [handleSubmit, showMentions, agents, mentionFilter, mentionHighlightIndex, insertMention, onNavigate]
   );
 
 
@@ -266,7 +282,7 @@ export function ChatInput({
               onPaste={handlePaste}
               data-placeholder="Message (Enter to send, Shift+Enter for new line, @ to mention)"
               className={cn(
-                "w-full px-4 py-3 rounded-[var(--radius-sm)] bg-surface border border-border resize-none min-h-[48px] max-h-[200px] overflow-y-auto text-sm focus:outline-none focus:border-accent/50 break-all",
+                "w-full px-4 py-3 rounded-[var(--radius-sm)] bg-surface border border-border resize-none min-h-[48px] max-h-[200px] overflow-y-auto text-sm focus:outline-none focus:border-accent/50 break-words",
                 "empty:before:content-[attr(data-placeholder)] empty:before:text-foreground-secondary/50 empty:before:pointer-events-none",
                 (sending || streaming || disabled) && "opacity-50 pointer-events-none"
               )}

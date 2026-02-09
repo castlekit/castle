@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState, useEffect } from "react";
+import { use, useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import { WifiOff, X, AlertCircle } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -188,6 +188,14 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
     sessionKey: currentSessionKey,
   });
 
+  // Ref to the navigate-between-messages function exposed by MessageList
+  const navigateRef = useRef<((direction: "up" | "down") => void) | null>(null);
+
+  // Handle Shift+ArrowUp/Down to navigate between messages
+  const handleNavigate = useCallback((direction: "up" | "down") => {
+    navigateRef.current?.(direction);
+  }, []);
+
   // Don't render until channel name, agents, and user settings have all loaded.
   const channelReady = channelName !== null && !agentsLoading && !userSettingsLoading;
 
@@ -259,6 +267,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
         channelName={channelName}
         channelCreatedAt={channelCreatedAt}
         highlightMessageId={highlightMessageId}
+        navigateRef={navigateRef}
       />
 
       {/* Error toast — sticky above input */}
@@ -288,6 +297,7 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
           agents={chatAgents}
           defaultAgentId={defaultAgentId}
           channelId={channelId}
+          onNavigate={handleNavigate}
         />
       </div>
     </div>

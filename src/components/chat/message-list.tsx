@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useCallback } from "react";
-import { Bot, CalendarDays, Loader2, MessageSquare } from "lucide-react";
+import { useEffect, useLayoutEffect, useRef, useCallback, useState } from "react";
+import { Bot, CalendarDays, ChevronUp, Loader2, MessageSquare } from "lucide-react";
 import { MessageBubble } from "./message-bubble";
 import { SessionDivider } from "./session-divider";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -76,6 +76,8 @@ interface MessageListProps {
   channelName?: string | null;
   channelCreatedAt?: number | null;
   highlightMessageId?: string;
+  /** Ref that will be populated with a navigate-between-messages function */
+  navigateRef?: React.MutableRefObject<((direction: "up" | "down") => void) | null>;
 }
 
 export function MessageList({
@@ -95,6 +97,7 @@ export function MessageList({
   channelName,
   channelCreatedAt,
   highlightMessageId,
+  navigateRef,
 }: MessageListProps) {
   const { statuses: agentStatuses, getStatus: getAgentStatus } = useAgentStatus();
   const userStatus = getAgentStatus(USER_STATUS_ID);
@@ -132,6 +135,13 @@ export function MessageList({
   const isLoadingOlder = useRef(false);
   const prevScrollHeightRef = useRef<number>(0);
   const highlightHandled = useRef<string | null>(null);
+
+  // "Scroll to message start" button — shows when the last agent message
+  // extends beyond the viewport so the user can jump to where it began.
+  const [showScrollToStart, setShowScrollToStart] = useState(false);
+  const lastAgentMsgId = useRef<string | null>(null);
+  // Once the user has navigated to a message's start, don't show the button again for it
+  const dismissedMsgId = useRef<string | null>(null);
 
   // Scroll helper
   const scrollToBottom = useCallback(() => {
@@ -229,9 +239,57 @@ export function MessageList({
     }
   }, [highlightMessageId, messages]);
 
+  // Track the last agent message ID so we can check if its top is in view.
+  // On initial load, auto-dismiss so the button only appears for NEW messages.
+  useEffect(() => {
+    const lastAgent = [...messages].reverse().find((m) => m.senderType === "agent");
+    const prevId = lastAgentMsgId.current;
+    lastAgentMsgId.current = lastAgent?.id ?? null;
+
+    if (!lastAgent) {
+      setShowScrollToStart(false);
+    } else if (prevId === null) {
+      // First time we see messages (page load) — dismiss the current one
+      dismissedMsgId.current = lastAgent.id;
+    }
+  }, [messages]);
+
+  // Check if the last agent message's top edge is scrolled out of view.
+  // Called on every scroll event via handleScroll.
+  const checkScrollToStart = useCallback(() => {
+    const container = scrollContainerRef.current;
+    if (!lastAgentMsgId.current || !container) {
+      setShowScrollToStart(false);
+      return;
+    }
+    // Already dismissed for this message — don't show again
+    if (dismissedMsgId.current === lastAgentMsgId.current) {
+      setShowScrollToStart(false);
+      return;
+    }
+    const el = document.getElementById(`msg-${lastAgentMsgId.current}`);
+    if (!el) {
+      setShowScrollToStart(false);
+      return;
+    }
+    const containerRect = container.getBoundingClientRect();
+    const elRect = el.getBoundingClientRect();
+    // Show button when the top of the message is above the container's top edge
+    // AND the bottom is still visible (user is reading the message)
+    const topAboveView = elRect.top < containerRect.top - 10;
+    const bottomStillVisible = elRect.bottom > containerRect.top;
+    const shouldShow = topAboveView && bottomStillVisible;
+    // If user scrolled to the top of the message, dismiss permanently
+    if (!topAboveView && dismissedMsgId.current !== lastAgentMsgId.current) {
+      dismissedMsgId.current = lastAgentMsgId.current;
+    }
+    setShowScrollToStart(shouldShow);
+  }, []);
+
   // Infinite scroll: up for older messages, down for newer messages
   const handleScroll = useCallback(() => {
     checkIfPinned();
+    checkScrollToStart();
     const container = scrollContainerRef.current;
     if (!container) return;
 
@@ -250,7 +308,7 @@ export function MessageList({
     if (scrollBottom < 100 && hasMoreAfter && !loadingNewer && onLoadNewer) {
       onLoadNewer();
     }
-  }, [hasMore, loadingMore, onLoadMore, hasMoreAfter, loadingNewer, onLoadNewer, checkIfPinned]);
+  }, [hasMore, loadingMore, onLoadMore, hasMoreAfter, loadingNewer, onLoadNewer, checkIfPinned, checkScrollToStart]);
 
   const getAgentName = (agentId: string) => {
     const agent = agents.find((a) => a.id === agentId);
@@ -333,12 +391,72 @@ export function MessageList({
     groupedContent.push(message);
   }
 
+  // Navigate between messages with Shift+Up/Down (also used by "Start of message" button)
+  const navigateToMessage = useCallback(
+    (direction: "up" | "down") => {
+      const container = scrollContainerRef.current;
+      if (!container || messages.length === 0) return;
+
+      const containerRect = container.getBoundingClientRect();
+      const threshold = 10; // px tolerance to avoid sticking on current message
+
+      if (direction === "up") {
+        // Find the last message whose top is above the current viewport top
+        for (let i = messages.length - 1; i >= 0; i--) {
+          const el = document.getElementById(`msg-${messages[i].id}`);
+          if (!el) continue;
+          const rect = el.getBoundingClientRect();
+          if (rect.top < containerRect.top - threshold) {
+            const offset =
+              rect.top - containerRect.top + container.scrollTop - 8;
+            container.scrollTo({ top: offset, behavior: "smooth" });
+            return;
+          }
+        }
+        // Already at the top — scroll to very top
+        container.scrollTo({ top: 0, behavior: "smooth" });
+      } else {
+        // Find the first message whose top is below the current viewport top
+        for (let i = 0; i < messages.length; i++) {
+          const el = document.getElementById(`msg-${messages[i].id}`);
+          if (!el) continue;
+          const rect = el.getBoundingClientRect();
+          if (rect.top > containerRect.top + threshold) {
+            const offset =
+              rect.top - containerRect.top + container.scrollTop - 8;
+            container.scrollTo({ top: offset, behavior: "smooth" });
+            return;
+          }
+        }
+        // Already at the bottom — scroll to very bottom
+        container.scrollTo({
+          top: container.scrollHeight,
+          behavior: "smooth",
+        });
+      }
+    },
+    [messages]
+  );
+
+  // Expose navigateToMessage to parent via ref
+  useEffect(() => {
+    if (navigateRef) {
+      navigateRef.current = navigateToMessage;
+    }
+    return () => {
+      if (navigateRef) {
+        navigateRef.current = null;
+      }
+    };
+  }, [navigateRef, navigateToMessage]);
+
   return (
-    <div
-      ref={scrollContainerRef}
-      className="flex-1 overflow-y-auto"
-      onScroll={handleScroll}
-    >
+    <div className="flex-1 relative overflow-hidden">
+      <div
+        ref={scrollContainerRef}
+        className="h-full overflow-y-auto"
+        onScroll={handleScroll}
+      >
       <div ref={contentRef} className="py-[20px] pr-[20px]">
         {/* Loading more indicator */}
         {loadingMore && (
@@ -503,6 +621,32 @@ export function MessageList({
 
         <div ref={bottomRef} />
       </div>
+      </div>
+
+      {/* Scroll to message start — appears when the last agent message's top is out of view */}
+      {showScrollToStart && (
+        <button
+          onClick={() => {
+            dismissedMsgId.current = lastAgentMsgId.current;
+            setShowScrollToStart(false);
+            // Scroll directly to the last agent message's start
+            if (lastAgentMsgId.current) {
+              const el = document.getElementById(`msg-${lastAgentMsgId.current}`);
+              const container = scrollContainerRef.current;
+              if (el && container) {
+                const containerRect = container.getBoundingClientRect();
+                const elRect = el.getBoundingClientRect();
+                const offset = elRect.top - containerRect.top + container.scrollTop - 8;
+                container.scrollTo({ top: offset, behavior: "smooth" });
+              }
+            }
+          }}
+          className="absolute bottom-3 right-0 h-12 w-12 flex items-center justify-center rounded-[var(--radius-sm)] bg-surface border border-border shadow-md text-foreground-secondary hover:text-foreground hover:border-border-hover transition-all cursor-pointer z-10"
+          title="Scroll to start of message (Shift+↑)"
+        >
+          <ChevronUp className="h-5 w-5" />
+        </button>
+      )}
     </div>
   );
 }

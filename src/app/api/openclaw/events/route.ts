@@ -59,6 +59,14 @@ export async function GET() {
       const onGatewayEvent = (evt: GatewayEvent) => {
         if (closed) return;
         try {
+          // ── DIAGNOSTIC LOGGING (remove after debugging) ──────────────
+          if (evt.event === "chat") {
+            const p = evt.payload as Record<string, unknown> | undefined;
+            console.log(
+              `[SSE-SERVER-DIAG] chat event: state=${p?.state} runId=${String(p?.runId ?? "").slice(0, 8)} seq=${evt.seq ?? p?.seq} textLen=${String(p?.text ?? "").length}`
+            );
+          }
+          // ── END DIAGNOSTIC ───────────────────────────────────────────
           const safe = redactEventPayload(evt);
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(safe)}\n\n`));
         } catch {
