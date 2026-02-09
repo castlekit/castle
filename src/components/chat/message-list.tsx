@@ -375,7 +375,7 @@ export function MessageList({
               return (
                 <div
                   key={`date-${item.key}`}
-                  className="flex items-center gap-3 py-1"
+                  className="flex items-center gap-3 py-1 my-[30px]"
                 >
                   <div className="flex-1 h-px bg-border" />
                   <span className="text-xs font-medium text-foreground-secondary shrink-0">

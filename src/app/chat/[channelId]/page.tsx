@@ -25,12 +25,12 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
   // different search results in the same channel).
   const searchParams = useSearchParams();
   const highlightMessageId = searchParams.get("m") || undefined;
-  const { agents, isConnected, isLoading: gatewayLoading } = useOpenClaw();
+  const { agents, isConnected, isLoading: gatewayLoading, agentsLoading } = useOpenClaw();
   const [channelName, setChannelName] = useState<string | null>(null);
   const [channelAgentIds, setChannelAgentIds] = useState<string[]>([]);
   const [channelCreatedAt, setChannelCreatedAt] = useState<number | null>(null);
   const [channelArchived, setChannelArchived] = useState(false);
-  const { displayName, avatarUrl: userAvatar } = useUserSettings();
+  const { displayName, avatarUrl: userAvatar, isLoading: userSettingsLoading } = useUserSettings();
 
   // Mark this channel as last accessed and fetch channel info
   useEffect(() => {
@@ -109,9 +109,9 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
     sessionKey: currentSessionKey,
   });
 
-  // Don't render until channel info or messages have loaded to prevent FOUC.
+  // Don't render until channel info, messages, agents, and user settings have loaded to prevent FOUC.
   // Fall back to showing content if channel name can't be resolved (e.g. archived channel).
-  const channelReady = channelName !== null || !isLoading;
+  const channelReady = (channelName !== null || !isLoading) && !agentsLoading && !userSettingsLoading;
 
   return (
     <div className={cn("flex-1 flex flex-col h-full overflow-hidden transition-opacity duration-150", channelReady ? "opacity-100" : "opacity-0")}>

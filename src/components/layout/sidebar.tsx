@@ -10,6 +10,7 @@ import {
   Sun,
   Moon,
   Settings,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 import { CastleIcon } from "@/components/icons/castle-icon";
@@ -152,7 +153,7 @@ function SidebarUserMenu() {
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
   const router = useRouter();
-  const { avatarUrl } = useUserSettings();
+  const { avatarUrl, isLoading: settingsLoading } = useUserSettings();
   const { getStatus } = useAgentStatus();
   const userStatus = getStatus(USER_STATUS_ID);
   const avatarDotStatus = userStatus === "active" ? "online" as const : "offline" as const;
@@ -181,7 +182,11 @@ function SidebarUserMenu() {
         className="group flex items-center justify-center rounded-[4px] cursor-pointer overflow-hidden transition-opacity"
       >
         <Avatar size="sm" status={avatarDotStatus}>
-          {avatarUrl ? (
+          {settingsLoading ? (
+            <AvatarFallback className="text-foreground-secondary">
+              <Loader2 className="h-4 w-4 animate-spin" />
+            </AvatarFallback>
+          ) : avatarUrl ? (
             <AvatarImage
               src={avatarUrl}
               alt="You"
