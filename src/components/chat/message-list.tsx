@@ -130,6 +130,7 @@ export function MessageList({
   const isInitialLoad = useRef(true);
   const pinnedToBottom = useRef(true);
   const isLoadingOlder = useRef(false);
+  const prevScrollHeightRef = useRef<number>(0);
   const highlightHandled = useRef<string | null>(null);
 
   // Scroll helper
@@ -185,12 +186,23 @@ export function MessageList({
   useLayoutEffect(() => {
     if (!isInitialLoad.current) {
       if (isLoadingOlder.current) {
+        // Restore scroll position after older messages are prepended.
+        // The new content pushes everything down, so we adjust scrollTop
+        // by the difference in scrollHeight to keep the user at the same spot.
+        const container = scrollContainerRef.current;
+        if (container && prevScrollHeightRef.current > 0) {
+          const newScrollHeight = container.scrollHeight;
+          const delta = newScrollHeight - prevScrollHeightRef.current;
+          container.scrollTop += delta;
+        }
+        prevScrollHeightRef.current = 0;
         isLoadingOlder.current = false;
       } else if (highlightMessageId) {
         // Don't auto-pin while a highlight target is active —
         // let the highlight scroll and user scrolling manage pinning.
-      } else {
-        pinnedToBottom.current = true;
+      } else if (pinnedToBottom.current) {
+        // Only re-pin if already pinned (e.g. new incoming message while at bottom).
+        // Don't force-pin when user has scrolled away.
       }
     }
   }, [messages, streamingMessages, highlightMessageId]);
@@ -226,8 +238,10 @@ export function MessageList({
     const { scrollTop, scrollHeight, clientHeight } = container;
 
     // Load older messages when scrolling near the top
-    if (scrollTop < 100 && hasMore && !loadingMore && onLoadMore) {
+    if (scrollTop < 200 && hasMore && !loadingMore && onLoadMore) {
       isLoadingOlder.current = true;
+      prevScrollHeightRef.current = scrollHeight;
+      pinnedToBottom.current = false;
       onLoadMore();
     }
 

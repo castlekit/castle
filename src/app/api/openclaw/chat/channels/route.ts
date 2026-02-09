@@ -124,11 +124,19 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-    const deleted = deleteChannel(body.id);
-    if (!deleted) {
-      return NextResponse.json({ error: "Channel not found" }, { status: 404 });
+    try {
+      const deleted = deleteChannel(body.id);
+      if (!deleted) {
+        return NextResponse.json({ error: "Channel not found" }, { status: 404 });
+      }
+      return NextResponse.json({ ok: true });
+    } catch (err) {
+      console.error("[Chat Channels] Delete failed:", (err as Error).message);
+      return NextResponse.json(
+        { error: sanitizeForApi((err as Error).message) },
+        { status: 500 }
+      );
     }
-    return NextResponse.json({ ok: true });
   }
 
   // ------ UPDATE ------

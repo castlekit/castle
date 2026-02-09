@@ -75,9 +75,12 @@ export function ArchivedChannels({
       if (res.ok) {
         setChannels((prev) => prev.filter((c) => c.id !== id));
         setConfirmDelete(null);
+      } else {
+        const data = await res.json().catch(() => ({}));
+        console.error("[Archive] Delete failed:", res.status, data);
       }
-    } catch {
-      // silent
+    } catch (err) {
+      console.error("[Archive] Delete error:", err);
     } finally {
       setActionLoading(null);
     }

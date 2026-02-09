@@ -128,8 +128,57 @@ export function updateChannel(
 
 export function deleteChannel(id: string): boolean {
   const db = getDb();
-  const result = db.delete(channels).where(eq(channels.id, id)).run();
-  return result.changes > 0;
+
+  // Access underlying better-sqlite3 for raw SQL operations
+  type SqliteClient = {
+    prepare: (sql: string) => { run: (...params: unknown[]) => { changes: number }; all: (...params: unknown[]) => Record<string, unknown>[] };
+    exec: (sql: string) => void;
+  };
+  type DrizzleDb = { session: { client: SqliteClient } };
+  const sqlite = (db as unknown as DrizzleDb).session.client;
+
+  // The FTS5 delete trigger can fail with "SQL logic error" if the FTS5 index
+  // is out of sync with the messages table. To avoid this:
+  // 1. Drop the FTS5 delete trigger
+  // 2. Delete all dependent records and the channel
+  // 3. Recreate the trigger
+  // 4. Rebuild the FTS5 index to stay in sync
+  sqlite.exec("DROP TRIGGER IF EXISTS messages_fts_delete");
+
+  try {
+    // Delete dependent records: attachments/reactions → messages → sessions → agents → channel
+    const msgIds = db
+      .select({ id: messages.id })
+      .from(messages)
+      .where(eq(messages.channelId, id))
+      .all()
+      .map((r) => r.id);
+
+    if (msgIds.length > 0) {
+      db.delete(messageAttachments)
+        .where(inArray(messageAttachments.messageId, msgIds))
+        .run();
+      db.delete(messageReactions)
+        .where(inArray(messageReactions.messageId, msgIds))
+        .run();
+    }
+
+    db.delete(messages).where(eq(messages.channelId, id)).run();
+    db.delete(sessions).where(eq(sessions.channelId, id)).run();
+    db.delete(channelAgents).where(eq(channelAgents.channelId, id)).run();
+
+    const result = db.delete(channels).where(eq(channels.id, id)).run();
+    return result.changes > 0;
+  } finally {
+    // Always recreate the trigger and rebuild FTS5 index
+    sqlite.exec(`
+      CREATE TRIGGER IF NOT EXISTS messages_fts_delete AFTER DELETE ON messages BEGIN
+        INSERT INTO messages_fts(messages_fts, rowid, content) VALUES ('delete', OLD.rowid, OLD.content);
+      END;
+    `);
+    // Rebuild FTS5 to stay in sync after bulk deletion
+    sqlite.exec("INSERT INTO messages_fts(messages_fts) VALUES ('rebuild')");
+  }
 }
 
 export function archiveChannel(id: string): boolean {
