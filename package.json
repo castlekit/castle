@@ -27,6 +27,7 @@
     "lint": "next lint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "stress": "vitest run --config vitest.stress.config.ts",
     "ci": "npm audit --omit=dev --audit-level=high && npm test && npm run build"
   },
   "repository": {
