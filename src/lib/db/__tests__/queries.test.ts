@@ -18,7 +18,19 @@ const TABLE_SQL = `
     name TEXT NOT NULL,
     default_agent_id TEXT NOT NULL,
     created_at INTEGER NOT NULL,
-    updated_at INTEGER
+    updated_at INTEGER,
+    last_accessed_at INTEGER,
+    archived_at INTEGER
+  );
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS agent_statuses (
+    agent_id TEXT PRIMARY KEY,
+    status TEXT NOT NULL DEFAULT 'idle',
+    updated_at INTEGER NOT NULL
   );
   CREATE TABLE IF NOT EXISTS channel_agents (
     channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
@@ -33,8 +45,10 @@ const TABLE_SQL = `
     ended_at INTEGER,
     summary TEXT,
     total_input_tokens INTEGER DEFAULT 0,
-    total_output_tokens INTEGER DEFAULT 0
+    total_output_tokens INTEGER DEFAULT 0,
+    compaction_boundary_message_id TEXT
   );
+  CREATE INDEX IF NOT EXISTS idx_sessions_channel ON sessions(channel_id, started_at);
   CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY,
     channel_id TEXT NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
@@ -52,6 +66,7 @@ const TABLE_SQL = `
     created_at INTEGER NOT NULL
   );
   CREATE INDEX IF NOT EXISTS idx_messages_channel ON messages(channel_id, created_at);
+  CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_messages_run_id ON messages(run_id);
   CREATE TABLE IF NOT EXISTS message_attachments (
     id TEXT PRIMARY KEY,
@@ -63,12 +78,19 @@ const TABLE_SQL = `
     original_name TEXT,
     created_at INTEGER NOT NULL
   );
+  CREATE INDEX IF NOT EXISTS idx_attachments_message ON message_attachments(message_id);
   CREATE TABLE IF NOT EXISTS message_reactions (
     id TEXT PRIMARY KEY,
     message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
     agent_id TEXT,
     emoji TEXT NOT NULL,
     emoji_char TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_reactions_message ON message_reactions(message_id);
+  CREATE TABLE IF NOT EXISTS recent_searches (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    query TEXT NOT NULL,
     created_at INTEGER NOT NULL
   );
 `;
@@ -108,19 +130,36 @@ describe("Database Queries", () => {
   let db: ReturnType<typeof drizzle>;
   let sqlite: Database.Database;
 
+  let originalDb: unknown;
+  let originalSqlite: unknown;
+  let originalMigrated: unknown;
+
   beforeAll(() => {
     const setup = createTestDb();
     db = setup.db;
     sqlite = setup.sqlite;
 
-    // Override the global DB for our query functions
-    const DB_KEY = "__castle_db__";
-    (globalThis as Record<string, unknown>)[DB_KEY] = db;
+    // Save original globals to restore later
+    const g = globalThis as Record<string, unknown>;
+    originalDb = g["__castle_db__"];
+    originalSqlite = g["__castle_sqlite__"];
+    originalMigrated = g["__castle_db_migrated__"];
+
+    // Override BOTH globals so getDb() uses the test DB
+    g["__castle_db__"] = db;
+    g["__castle_sqlite__"] = sqlite;
+    g["__castle_db_migrated__"] = 999; // skip migration check (higher than any real SCHEMA_VERSION)
   });
 
   afterAll(() => {
     sqlite.close();
     try { rmSync(tmpDir, { recursive: true }); } catch { /* ignore */ }
+
+    // Restore original globals
+    const g = globalThis as Record<string, unknown>;
+    g["__castle_db__"] = originalDb;
+    g["__castle_sqlite__"] = originalSqlite;
+    g["__castle_db_migrated__"] = originalMigrated;
   });
 
   // ---- Channels ----
@@ -313,6 +352,79 @@ describe("Database Queries", () => {
       expect(stats.messages).toBeGreaterThan(0);
       expect(stats.channels).toBeGreaterThan(0);
       expect(typeof stats.totalAttachmentBytes).toBe("number");
+    });
+  });
+
+  // ---- FTS Sync ----
+
+  describe("FTS Sync", () => {
+    it("deleteChannel should keep FTS in sync", async () => {
+      const { createChannel, createMessage, deleteChannel } = await import("../queries");
+
+      const channel = createChannel("FTS Sync Test", "agent-1");
+      createMessage({ channelId: channel.id, senderType: "user", senderId: "u1", content: "msg1" });
+      createMessage({ channelId: channel.id, senderType: "user", senderId: "u1", content: "msg2" });
+      createMessage({ channelId: channel.id, senderType: "user", senderId: "u1", content: "msg3" });
+
+      const beforeMsg = (sqlite.prepare("SELECT COUNT(*) as c FROM messages").get() as { c: number }).c;
+      const beforeFts = (sqlite.prepare("SELECT COUNT(*) as c FROM messages_fts_content").get() as { c: number }).c;
+      expect(beforeFts).toBe(beforeMsg);
+
+      // Delete channel — should clean up FTS entries too
+      deleteChannel(channel.id);
+
+      const afterMsg = (sqlite.prepare("SELECT COUNT(*) as c FROM messages").get() as { c: number }).c;
+      const afterFts = (sqlite.prepare("SELECT COUNT(*) as c FROM messages_fts_content").get() as { c: number }).c;
+      expect(afterFts).toBe(afterMsg);
+
+      // Verify no orphaned FTS entries
+      const orphaned = (sqlite.prepare(
+        "SELECT COUNT(*) as c FROM messages_fts_content WHERE id NOT IN (SELECT rowid FROM messages)"
+      ).get() as { c: number }).c;
+      expect(orphaned).toBe(0);
+    });
+
+    it("createMessage should auto-repair FTS and succeed if FTS has orphaned entries", async () => {
+      const { createChannel, createMessage } = await import("../queries");
+
+      const channel = createChannel("FTS Repair Test", "agent-1");
+
+      // Simulate FTS corruption: find what the next message rowid will be,
+      // then inject fake FTS entries at a range of upcoming rowids.
+      const maxRowid = (sqlite.prepare("SELECT MAX(rowid) as m FROM messages").get() as { m: number | null }).m ?? 0;
+
+      // Inject orphans at the next several rowids to guarantee a collision
+      for (let i = 1; i <= 5; i++) {
+        sqlite.prepare("INSERT INTO messages_fts(rowid, content) VALUES (?, ?)").run(maxRowid + i, `orphan-${i}`);
+      }
+
+      // Verify orphans exist
+      const orphanedBefore = (sqlite.prepare(
+        "SELECT COUNT(*) as c FROM messages_fts_content WHERE id NOT IN (SELECT rowid FROM messages)"
+      ).get() as { c: number }).c;
+      expect(orphanedBefore).toBe(5);
+
+      // Now inserting a new message will collide with an orphaned FTS entry.
+      // createMessage should detect the SQLITE_CONSTRAINT_PRIMARYKEY from the FTS trigger,
+      // rebuild FTS, and retry successfully.
+      const msg = createMessage({ channelId: channel.id, senderType: "user", senderId: "u1", content: "after repair" });
+      expect(msg.id).toBeTruthy();
+      expect(msg.content).toBe("after repair");
+
+      // Verify the message is actually in the DB
+      const inDb = sqlite.prepare("SELECT id FROM messages WHERE id = ?").get(msg.id);
+      expect(inDb).toBeTruthy();
+
+      // FTS should be clean now (all orphans gone, new message synced)
+      const orphanedAfter = (sqlite.prepare(
+        "SELECT COUNT(*) as c FROM messages_fts_content WHERE id NOT IN (SELECT rowid FROM messages)"
+      ).get() as { c: number }).c;
+      expect(orphanedAfter).toBe(0);
+
+      // Verify message count matches FTS count
+      const msgCount = (sqlite.prepare("SELECT COUNT(*) as c FROM messages").get() as { c: number }).c;
+      const ftsCount = (sqlite.prepare("SELECT COUNT(*) as c FROM messages_fts_content").get() as { c: number }).c;
+      expect(ftsCount).toBe(msgCount);
     });
   });
 });

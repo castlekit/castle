@@ -122,26 +122,42 @@ export interface QueuedMessage {
 }
 
 // ============================================================================
-// Session Status (from Gateway session.status RPC)
+// Session Status (read from OpenClaw session store on filesystem)
 // ============================================================================
 
 export interface SessionStatus {
   sessionKey: string;
+  sessionId: string;
   agentId: string;
   model: string;
+  modelProvider: string;
   tokens: {
     input: number;
     output: number;
+    total: number;
   };
   context: {
-    used: number;
-    limit: number;
-    percentage: number;
+    used: number;       // totalTokens (current context window usage)
+    limit: number;      // effective operating limit (from config, default 200k)
+    modelMax: number;   // model's theoretical max (e.g. 1M for Sonnet 4.5)
+    percentage: number; // used / limit * 100
   };
   compactions: number;
-  runtime: string;
-  thinking: string;
+  thinkingLevel: string | null;
   updatedAt: number;
+  /** System prompt breakdown — only present when the session has run at least once */
+  systemPrompt?: {
+    totalChars: number;
+    projectContextChars: number;
+    nonProjectContextChars: number;
+    skills: { promptChars: number; count: number };
+    tools: { listChars: number; schemaChars: number; count: number };
+    workspaceFiles: Array<{
+      name: string;
+      injectedChars: number;
+      truncated: boolean;
+    }>;
+  };
 }
 
 // ============================================================================

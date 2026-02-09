@@ -68,6 +68,10 @@ export const sessions = sqliteTable(
     summary: text("summary"),
     totalInputTokens: integer("total_input_tokens").default(0),
     totalOutputTokens: integer("total_output_tokens").default(0),
+    // Compaction tracking: ID of the oldest message still in the agent's context.
+    // Messages before this boundary have been compacted (summarized).
+    // Updated when compaction events are detected.
+    compactionBoundaryMessageId: text("compaction_boundary_message_id"),
   },
   (table) => [
     index("idx_sessions_channel").on(table.channelId, table.startedAt),

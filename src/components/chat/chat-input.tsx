@@ -251,10 +251,12 @@ export function ChatInput({
 
 
 
-  // Focus editor on mount
+  // Focus editor on channel change or when it becomes enabled
   useEffect(() => {
-    editorRef.current?.focus();
-  }, [channelId]);
+    if (!disabled) {
+      editorRef.current?.focus();
+    }
+  }, [channelId, disabled]);
 
   return (
     <div className={cn("space-y-3", className)}>

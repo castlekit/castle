@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useCallback, useState } from "react";
-import { Bot, CalendarDays, ChevronUp, Loader2, MessageSquare } from "lucide-react";
+import { Bot, CalendarDays, ChevronUp, Loader2, MessageSquare, Zap } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { MessageBubble } from "./message-bubble";
 import { SessionDivider } from "./session-divider";
 import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
@@ -78,6 +79,10 @@ interface MessageListProps {
   highlightMessageId?: string;
   /** Ref that will be populated with a navigate-between-messages function */
   navigateRef?: React.MutableRefObject<((direction: "up" | "down") => void) | null>;
+  /** ID of the oldest message still in the agent's context (compaction boundary) */
+  compactionBoundaryMessageId?: string | null;
+  /** Total number of compactions in this session */
+  compactionCount?: number;
 }
 
 export function MessageList({
@@ -98,6 +103,8 @@ export function MessageList({
   channelCreatedAt,
   highlightMessageId,
   navigateRef,
+  compactionBoundaryMessageId,
+  compactionCount,
 }: MessageListProps) {
   const { statuses: agentStatuses, getStatus: getAgentStatus } = useAgentStatus();
   const userStatus = getAgentStatus(USER_STATUS_ID);
@@ -320,18 +327,6 @@ export function MessageList({
     return agent?.avatar;
   };
 
-  if (!loading && messages.length === 0 && (!streamingMessages || streamingMessages.size === 0)) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <div className="flex flex-col items-center">
-          <MessageSquare className="h-9 w-9 text-foreground-secondary/40 mb-3" />
-          <span className="text-sm font-medium text-foreground-secondary">No messages yet</span>
-          <span className="text-xs text-foreground-secondary/60 mt-1">Start the conversation</span>
-        </div>
-      </div>
-    );
-  }
-
   // Format a date label like Slack does
   const formatDateLabel = (timestamp: number): string => {
     const date = new Date(timestamp);
@@ -450,13 +445,26 @@ export function MessageList({
     };
   }, [navigateRef, navigateToMessage]);
 
+  if (!loading && messages.length === 0 && (!streamingMessages || streamingMessages.size === 0)) {
+    return (
+      <div className="flex-1 flex items-center justify-center">
+        <div className="flex flex-col items-center">
+          <MessageSquare className="h-9 w-9 text-foreground-secondary/40 mb-3" />
+          <span className="text-sm font-medium text-foreground-secondary">No messages yet</span>
+          <span className="text-xs text-foreground-secondary/60 mt-1">Start the conversation</span>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex-1 relative overflow-hidden">
       <div
         ref={scrollContainerRef}
-        className="h-full overflow-y-auto"
+        className="h-full overflow-y-auto flex flex-col"
         onScroll={handleScroll}
       >
+      <div className="flex-1" />
       <div ref={contentRef} className="py-[20px] pr-[20px]">
         {/* Loading more indicator */}
         {loadingMore && (
@@ -527,20 +535,41 @@ export function MessageList({
             && prevMessage.senderType === message.senderType
             && prevMessage.senderId === message.senderId;
 
+          // Determine if this message is compacted (before the boundary)
+          const isCompacted = compactionBoundaryMessageId
+            ? message.id !== compactionBoundaryMessageId &&
+              messages.indexOf(message) < messages.findIndex((m) => m.id === compactionBoundaryMessageId)
+            : false;
+
+          // Show compaction divider just before the boundary message
+          const showCompactionDivider = compactionBoundaryMessageId === message.id && (compactionCount ?? 0) > 0;
+
           return (
             <div key={message.id} id={`msg-${message.id}`}>
-              <MessageBubble
-                message={message}
-                isAgent={message.senderType === "agent"}
-                agentName={agent?.name || getAgentName(message.senderId)}
-                agentAvatar={agent?.avatar || getAgentAvatar(message.senderId)}
-                userAvatar={userAvatar}
-                agents={agents}
-                showHeader={!isSameSender}
-                agentStatus={message.senderType === "agent" ? getAgentStatus(message.senderId) : undefined}
-                userStatus={message.senderType === "user" ? userStatus : undefined}
-                highlighted={highlightMessageId === message.id}
-              />
+              {showCompactionDivider && (
+                <div className="flex items-center gap-3 py-1 my-[20px]">
+                  <div className="flex-1 h-px bg-yellow-500/30" />
+                  <span className="text-[11px] text-yellow-600 dark:text-yellow-400 shrink-0 flex items-center gap-1.5">
+                    <Zap className="h-3 w-3" />
+                    Context compacted ({compactionCount} time{compactionCount !== 1 ? "s" : ""}) — agent has a summary of messages above
+                  </span>
+                  <div className="flex-1 h-px bg-yellow-500/30" />
+                </div>
+              )}
+              <div className={cn(isCompacted && "opacity-50")}>
+                <MessageBubble
+                  message={message}
+                  isAgent={message.senderType === "agent"}
+                  agentName={agent?.name || getAgentName(message.senderId)}
+                  agentAvatar={agent?.avatar || getAgentAvatar(message.senderId)}
+                  userAvatar={userAvatar}
+                  agents={agents}
+                  showHeader={!isSameSender}
+                  agentStatus={message.senderType === "agent" ? getAgentStatus(message.senderId) : undefined}
+                  userStatus={message.senderType === "user" ? userStatus : undefined}
+                  highlighted={highlightMessageId === message.id}
+                />
+              </div>
             </div>
           );
         })}

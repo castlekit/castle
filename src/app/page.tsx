@@ -11,6 +11,7 @@ import { Avatar, AvatarImage, AvatarFallback } from "@/components/ui/avatar";
 import { cn } from "@/lib/utils";
 import { useOpenClaw, type OpenClawAgent } from "@/lib/hooks/use-openclaw";
 import { useAgentStatus, type AgentStatus } from "@/lib/hooks/use-agent-status";
+import { SearchTrigger } from "@/components/providers/search-provider";
 
 function getInitials(name: string) {
   return name.slice(0, 2).toUpperCase();
@@ -329,15 +330,16 @@ export default function HomePage() {
       <Sidebar variant="solid" />
 
       <main className="min-h-screen ml-[80px]">
-        <div className="p-8 max-w-4xl">
-          {/* Header */}
-          <div className="mb-8">
-            <PageHeader
-              title="Castle"
-              subtitle="The multi-agent workspace"
-            />
-          </div>
+        {/* Header — full width */}
+        <div className="px-8 py-5 flex items-center justify-between gap-4 border-b border-border">
+          <PageHeader
+            title="Castle"
+            subtitle="The multi-agent workspace"
+          />
+          <SearchTrigger />
+        </div>
 
+        <div className="p-8 max-w-4xl">
           {/* OpenClaw Connection Status */}
           <ConnectionCard
             isConnected={isConnected}
