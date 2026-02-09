@@ -173,6 +173,15 @@ jobs:
       - name: Check version bump
         if: github.event_name == 'pull_request'
         run: |
+          # Skip version bump check if only CI/docs files changed
+          CHANGED=$(git diff --name-only origin/main...HEAD)
+          CODE_CHANGED=$(echo "$CHANGED" | grep -v '^\.github/' | grep -v '^LICENSE' | grep -v '^CONTRIBUTING\.md' | grep -v '^SECURITY\.md' | grep -v '^\.github/.*\.md$' || true)
+
+          if [ -z "$CODE_CHANGED" ]; then
+            echo "Only CI/docs files changed — skipping version bump check."
+            exit 0
+          fi
+
           MAIN_VERSION=$(git show origin/main:package.json | node -e "process.stdin.setEncoding('utf8');let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).version))")
           PR_VERSION=$(node -p "require('./package.json').version")
           echo "main: $MAIN_VERSION → PR: $PR_VERSION"
@@ -201,6 +210,7 @@ jobs:
     timeout-minutes: 5
     permissions:
       contents: write
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -234,8 +244,6 @@ jobs:
           if [ "$VERSION" = "$PUBLISHED" ]; then
             echo "v$VERSION already published, skipping."
           else
-            npm publish --access public
+            npm publish --access public --provenance
             echo "Published @castlekit/castle@$VERSION"
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
