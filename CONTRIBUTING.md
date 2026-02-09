@@ -30,6 +30,17 @@ npm run test:watch  # watch mode
 
 Tests use in-memory SQLite databases and don't touch any live services.
 
+## Pre-commit hooks
+
+We use [pre-commit](https://pre-commit.com) for local checks (secret scanning, file hygiene, GitHub Actions linting):
+
+```bash
+pip install pre-commit
+pre-commit install
+```
+
+Hooks run automatically on every commit. See `.pre-commit-config.yaml` for the full list.
+
 ## License
 
 By contributing, you agree that your contributions will be licensed under the [MIT License](LICENSE).

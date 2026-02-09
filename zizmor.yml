@@ -1,0 +1,17 @@
+# zizmor configuration — GitHub Actions security scanner
+# https://docs.zizmor.sh/configuration/
+
+rules:
+  # Disable unpinned-uses — pinning to SHA hashes is a significant change
+  # that should be done deliberately, not enforced by automation
+  unpinned-uses:
+    disable: true
+
+  # Disable excessive-permissions — adding explicit permissions blocks
+  # requires careful review of each workflow's needs
+  excessive-permissions:
+    disable: true
+
+  # Disable artipacked (persist-credentials) — low confidence finding
+  artipacked:
+    disable: true

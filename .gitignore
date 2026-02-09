@@ -42,3 +42,6 @@ next-env.d.ts
 # design system reference (regenerate from SaaS frontend)
 CASTLE_DESIGN_SYSTEM_FULL.md
 
+# python virtual environment (for detect-secrets, pre-commit)
+.venv/
+
