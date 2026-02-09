@@ -18,6 +18,76 @@ interface ChannelPageProps {
   params: Promise<{ channelId: string }>;
 }
 
+// Module-level flag: once any channel has rendered real content, subsequent
+// channel switches use a smooth opacity transition instead of the skeleton.
+let hasEverRendered = false;
+
+// ---------------------------------------------------------------------------
+// Skeleton loader — Facebook-style placeholder while data loads
+// ---------------------------------------------------------------------------
+const LINE_WIDTHS = ["80%", "60%", "40%", "75%", "55%", "85%", "45%", "70%", "50%"];
+
+function SkeletonMessage({ lines = 2, short = false, offset = 0 }: { lines?: number; short?: boolean; offset?: number }) {
+  return (
+    <div className="flex gap-3 mb-[4px]">
+      <div className="skeleton w-9 h-9 rounded-full shrink-0 mt-0.5" />
+      <div className="flex flex-col gap-1.5 flex-1">
+        <div className="flex items-center gap-2">
+          <div className={cn("skeleton h-3.5", short ? "w-16" : "w-24")} />
+          <div className="skeleton h-3 w-14" />
+        </div>
+        {Array.from({ length: lines }).map((_, i) => (
+          <div
+            key={i}
+            className="skeleton h-3.5"
+            style={{ width: LINE_WIDTHS[(offset + i) % LINE_WIDTHS.length] }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ChatSkeleton() {
+  return (
+    <div className="flex-1 flex flex-col h-full overflow-hidden">
+      {/* Header skeleton */}
+      <div className="py-4 border-b border-border shrink-0 min-h-[83px] flex items-center">
+        <div>
+          <div className="skeleton h-5 w-40 mb-1.5" />
+          <div className="skeleton h-3.5 w-28" />
+        </div>
+      </div>
+
+      {/* Messages skeleton */}
+      <div className="flex-1 overflow-hidden py-[20px] pr-[20px]">
+        <div className="flex flex-col gap-6">
+          <SkeletonMessage lines={3} offset={0} />
+          <SkeletonMessage lines={1} short offset={3} />
+          <SkeletonMessage lines={2} offset={4} />
+          <SkeletonMessage lines={1} short offset={6} />
+          <SkeletonMessage lines={2} offset={7} />
+          <SkeletonMessage lines={3} offset={1} />
+          <SkeletonMessage lines={1} short offset={5} />
+        </div>
+      </div>
+
+      {/* Real input, just disabled while loading */}
+      <div className="shrink-0">
+        <ChatInput
+          onSend={() => Promise.resolve()}
+          onAbort={() => Promise.resolve()}
+          sending={false}
+          streaming={false}
+          disabled
+          agents={[]}
+          channelId=""
+        />
+      </div>
+    </div>
+  );
+}
+
 function ChannelChatContent({ channelId }: { channelId: string }) {
   // Read ?m= param for scroll-to-message from search results.
   // useSearchParams() is reactive — it updates when the query string
@@ -109,17 +179,23 @@ function ChannelChatContent({ channelId }: { channelId: string }) {
     sessionKey: currentSessionKey,
   });
 
-  // Don't render until channel info, messages, agents, and user settings have loaded to prevent FOUC.
-  // Fall back to showing content if channel name can't be resolved (e.g. archived channel).
-  const channelReady = (channelName !== null || !isLoading) && !agentsLoading && !userSettingsLoading;
+  // Don't render until channel name, agents, and user settings have all loaded.
+  const channelReady = channelName !== null && !agentsLoading && !userSettingsLoading;
+
+  // First load → skeleton. Channel switches → smooth opacity transition.
+  if (channelReady) hasEverRendered = true;
+
+  if (!channelReady && !hasEverRendered) {
+    return <ChatSkeleton />;
+  }
 
   return (
     <div className={cn("flex-1 flex flex-col h-full overflow-hidden transition-opacity duration-150", channelReady ? "opacity-100" : "opacity-0")}>
       {/* Channel header — sticky */}
-      <div className="py-4 border-b border-border flex items-center justify-between shrink-0">
+      <div className="py-4 border-b border-border flex items-center justify-between shrink-0 min-h-[83px]">
         <div>
           <h2 className="text-lg font-semibold text-foreground">
-            {channelName || ""}
+            {channelName}
             {channelArchived && (
               <span className="ml-2 text-sm font-normal text-foreground-secondary">(Archived)</span>
             )}

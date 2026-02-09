@@ -183,9 +183,7 @@ function SidebarUserMenu() {
       >
         <Avatar size="sm" status={avatarDotStatus}>
           {settingsLoading ? (
-            <AvatarFallback className="text-foreground-secondary">
-              <Loader2 className="h-4 w-4 animate-spin" />
-            </AvatarFallback>
+            <AvatarFallback className="skeleton" />
           ) : avatarUrl ? (
             <AvatarImage
               src={avatarUrl}

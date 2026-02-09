@@ -350,3 +350,24 @@ img.emoji {
   animation: highlight-flash 2s ease-out;
 }
 
+/* Skeleton shimmer */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    oklch(from var(--color-foreground) l c h / 0.06) 25%,
+    oklch(from var(--color-foreground) l c h / 0.12) 50%,
+    oklch(from var(--color-foreground) l c h / 0.06) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 4px;
+}
+
