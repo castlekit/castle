@@ -1,0 +1,241 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.head_ref || github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Lint → Test → Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Scan for leaked secrets
+        if: github.event_name == 'pull_request'
+        run: |
+          # Only scan ADDED lines (not removals or context) and exclude test files
+          ADDED=$(git diff origin/main...HEAD -- . ':!package-lock.json' ':!src/**/__tests__/**' ':!src/**/*.test.*' \
+            | grep '^+' | grep -v '^+++' || true)
+
+          # --- Generic secret patterns ---
+          PATTERNS=(
+            'sk-[A-Za-z0-9]{20,}'
+            'sk_live_[A-Za-z0-9]+'
+            'sk_test_[A-Za-z0-9]+'
+            'AKIA[0-9A-Z]{16}'
+            'ghp_[A-Za-z0-9]{36}'
+            'gho_[A-Za-z0-9]{36}'
+            'github_pat_[A-Za-z0-9_]{80,}'
+            'xox[bprs]-[A-Za-z0-9\-]+'
+            'eyJ[A-Za-z0-9_-]{30,}\.[A-Za-z0-9_-]{30,}'
+            '-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----'
+          )
+
+          # --- OpenClaw / Castle specific ---
+          # rew_ tokens — real ones are 32+ hex chars; short test values are fine
+          PATTERNS+=( 'rew_[a-f0-9]{32,}' )
+          # Hardcoded env var values (not ${VAR} references)
+          PATTERNS+=( 'OPENCLAW_GATEWAY_TOKEN\s*=\s*[^$\s"].{8,}' )
+          # Remote WebSocket URLs (exclude localhost 127.0.0.1)
+          PATTERNS+=( 'wss?://(?!127\.0\.0\.1)[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+' )
+
+          FOUND=0
+          for PATTERN in "${PATTERNS[@]}"; do
+            MATCHES=$(echo "$ADDED" | grep -Pn "$PATTERN" || true)
+            if [ -n "$MATCHES" ]; then
+              echo "::error::Potential secret detected matching pattern: $PATTERN"
+              echo "$MATCHES" | head -5
+              FOUND=1
+            fi
+          done
+
+          if [ "$FOUND" -eq 1 ]; then
+            echo ""
+            echo "::error::Secrets detected in diff. Remove them before merging."
+            exit 1
+          fi
+          echo "No secrets detected."
+
+      - name: Check for sensitive files
+        if: github.event_name == 'pull_request'
+        run: |
+          SENSITIVE=(
+            '\.env$'
+            '\.env\.'
+            '\.pem$'
+            '\.key$'
+            '\.p12$'
+            '\.pfx$'
+            '\.jks$'
+            'id_rsa'
+            'id_ed25519'
+            'id_ecdsa'
+            '\.castle/'
+            '\.openclaw/'
+            'castle\.json$'
+            'device\.json$'
+            'credentials\.json$'
+            '\.npmrc$'
+            '\.yarnrc$'
+            'castle\.db'
+            'castle-[0-9].*\.db'
+            'backups/'
+            '\.db-wal$'
+            '\.db-shm$'
+            '\.sqlite$'
+            '\.sqlite3$'
+            '\.sql$'
+            '\.log$'
+            '\.err$'
+          )
+
+          NEW_FILES=$(git diff --name-only --diff-filter=A origin/main...HEAD)
+          FOUND=0
+          for PATTERN in "${SENSITIVE[@]}"; do
+            MATCHES=$(echo "$NEW_FILES" | grep -P "$PATTERN" || true)
+            if [ -n "$MATCHES" ]; then
+              echo "::error::Sensitive file added: $MATCHES"
+              FOUND=1
+            fi
+          done
+
+          if [ "$FOUND" -eq 1 ]; then
+            echo "::error::Sensitive files detected. Add them to .gitignore and remove from the PR."
+            exit 1
+          fi
+          echo "No sensitive files detected."
+
+      - name: Check for large files
+        if: github.event_name == 'pull_request'
+        run: |
+          MAX_KB=512
+          LARGE=$(git diff --name-only --diff-filter=d origin/main...HEAD | while read -r f; do
+            if [ -f "$f" ]; then
+              SIZE=$(wc -c < "$f")
+              if [ "$SIZE" -gt $((MAX_KB * 1024)) ]; then
+                echo "$f ($(( SIZE / 1024 ))KB)"
+              fi
+            fi
+          done)
+
+          if [ -n "$LARGE" ]; then
+            echo "::error::Files over ${MAX_KB}KB detected (excluding package-lock.json):"
+            echo "$LARGE" | grep -v 'package-lock.json' || true
+            FILTERED=$(echo "$LARGE" | grep -v 'package-lock.json' || true)
+            if [ -n "$FILTERED" ]; then
+              echo "::error::Large files should not be committed to git. Use .gitignore or Git LFS."
+              exit 1
+            fi
+          fi
+          echo "No oversized files detected."
+
+      - name: Check for stray console.log in source
+        if: github.event_name == 'pull_request'
+        run: |
+          DIFF=$(git diff origin/main...HEAD -- 'src/' ':!src/**/__tests__/**' ':!src/**/*.test.*')
+
+          # Allow structured dev logs like console.log("[Tag]...") and console.log(`[Tag]...`)
+          # Only flag bare console.log() calls without a bracketed prefix
+          MATCHES=$(echo "$DIFF" \
+            | grep -n '^\+.*console\.log' \
+            | grep -v '^\+.*//.*console\.log' \
+            | grep -v 'console\.log(`\[' \
+            | grep -v 'console\.log("\[' \
+            | grep -v "console\.log('\[" \
+            | grep -v 'console\.log(\s*$' \
+            || true)
+
+          if [ -n "$MATCHES" ]; then
+            echo "::warning::Unstructured console.log statements found in source code (not tests):"
+            echo "$MATCHES"
+            echo ""
+            echo "::error::Use structured logging with a prefix: console.log('[Tag] message')"
+            exit 1
+          fi
+          echo "No stray console.log found."
+
+      - name: Check version bump
+        if: github.event_name == 'pull_request'
+        run: |
+          MAIN_VERSION=$(git show origin/main:package.json | node -e "process.stdin.setEncoding('utf8');let d='';process.stdin.on('data',c=>d+=c);process.stdin.on('end',()=>console.log(JSON.parse(d).version))")
+          PR_VERSION=$(node -p "require('./package.json').version")
+          echo "main: $MAIN_VERSION → PR: $PR_VERSION"
+          if [ "$MAIN_VERSION" = "$PR_VERSION" ]; then
+            echo "::error::Version in package.json ($PR_VERSION) has not been bumped from main. Please update the version before merging."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Audit dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  release:
+    name: Tag & Publish
+    needs: ci
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Create version tag
+        run: |
+          VERSION="v$(node -p "require('./package.json').version")"
+          if git ls-remote --tags origin "$VERSION" | grep -q "$VERSION"; then
+            echo "Tag $VERSION already exists, skipping."
+          else
+            git tag "$VERSION"
+            git push origin "$VERSION"
+            echo "Tagged $VERSION"
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to npm
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          PUBLISHED=$(npm view @castlekit/castle version 2>/dev/null || echo "none")
+          if [ "$VERSION" = "$PUBLISHED" ]; then
+            echo "v$VERSION already published, skipping."
+          else
+            npm publish --access public
+            echo "Published @castlekit/castle@$VERSION"
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

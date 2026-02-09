@@ -1,18 +1,33 @@
 {
   "name": "@castlekit/castle",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "The multi-agent workspace",
   "type": "module",
   "bin": {
     "castle": "./bin/castle.js"
   },
+  "files": [
+    "bin/",
+    "src/",
+    "index.js",
+    "install.sh",
+    "next.config.ts",
+    "postcss.config.mjs",
+    "tsconfig.json",
+    "drizzle.config.ts",
+    "LICENSE",
+    "README.md",
+    "!src/**/__tests__/**",
+    "!src/**/*.test.*"
+  ],
   "scripts": {
     "dev": "next dev -p 3333",
     "build": "next build",
     "start": "next start -p 3333",
     "lint": "next lint",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "ci": "npm audit --omit=dev --audit-level=high && npm test && npm run build"
   },
   "repository": {
     "type": "git",
