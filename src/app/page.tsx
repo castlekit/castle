@@ -206,7 +206,7 @@ function ConnectionCard({
 }) {
   const getSubtitle = () => {
     if (isLoading) return "Connecting to Gateway...";
-    if (!isConfigured) return "Run 'castle setup' to configure";
+    if (!isConfigured) return "OpenClaw not installed — visit openclaw.ai";
     if (isConnected) {
       const parts = ["Connected"];
       if (serverVersion) parts[0] = `Connected to OpenClaw ${serverVersion}`;
@@ -247,8 +247,8 @@ function ConnectionCard({
           {isLoading ? (
             <Badge variant="outline">Connecting...</Badge>
           ) : (
-            <Badge variant={isConnected ? "success" : "error"}>
-              {isConnected ? "Connected" : "Disconnected"}
+            <Badge variant={isConnected ? "success" : isConfigured ? "error" : "outline"}>
+              {isConnected ? "Connected" : isConfigured ? "Disconnected" : "Not Installed"}
             </Badge>
           )}
         </div>
