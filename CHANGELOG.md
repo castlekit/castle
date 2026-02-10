@@ -2,7 +2,7 @@
 
 All notable changes to Castle are documented here.
 
-## 0.4.1 (2026-02-10)
+## 0.4.2 (2026-02-10)
 
 ### Added
 
