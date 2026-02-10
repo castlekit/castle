@@ -12,13 +12,13 @@ if (module.enableCompileCache && !process.env.NODE_DISABLE_COMPILE_CACHE) {
 // Bootstrap tsx from the package's own node_modules so it works
 // regardless of the user's current working directory.
 import { dirname, resolve } from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
 if (!process.env._CASTLE_CLI) {
   const { execFileSync } = await import("child_process");
-  const tsxImport = resolve(__dirname, "..", "node_modules", "tsx", "dist", "esm", "index.mjs");
+  const tsxImport = pathToFileURL(resolve(__dirname, "..", "node_modules", "tsx", "dist", "esm", "index.mjs")).href;
   try {
     execFileSync(process.execPath, ["--import", tsxImport, ...process.argv.slice(1)], {
       stdio: "inherit",

@@ -2,6 +2,22 @@
 
 All notable changes to Castle are documented here.
 
+## 0.4.2 (2026-02-10)
+
+### Fixed
+
+- **Windows ESM path crash** — `bin/castle.js` now converts the tsx import path to a `file://` URL via `pathToFileURL`, fixing `ERR_UNSUPPORTED_ESM_URL_SCHEME` on Windows where `C:\...` paths are not valid ESM specifiers
+- **Windows winget source error** — `install.ps1` now passes `--source winget` to avoid certificate failures from the Microsoft Store source
+- **install.ps1 encoding** — replaced all Unicode characters (em dashes, box-drawing) with ASCII equivalents to prevent PowerShell parse errors on Windows
+- **OpenClaw install command** — fixed broken PowerShell syntax for auto-installing OpenClaw during `castle setup`; now downloads script to temp file before executing with `-NoOnboard`
+- **Silent install failures** — changed OpenClaw install from `stdio: "pipe"` to `stdio: "inherit"` so errors are visible, increased timeout to 5 minutes
+- **Browser open on Windows** — uses native `start` command instead of the `open` npm package which caused a flashing CMD window
+
+### Changed
+
+- **Setup no longer exits when OpenClaw is missing** — declining or failing to install OpenClaw now continues setup with defaults instead of exiting; users can reconfigure later with `castle setup`
+- **Smarter connection status** — UI now shows "Not Installed" (outline badge) when OpenClaw isn't configured, instead of the misleading "Disconnected" (red badge)
+
 ## 0.4.1 (2026-02-10)
 
 ### Added

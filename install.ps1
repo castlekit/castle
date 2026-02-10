@@ -12,7 +12,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# ─── Taglines ────────────────────────────────────────────────────────────────
+# --- Taglines -----------------------------------------------------------------
 
 $Taglines = @(
     "Your kingdom awaits, sire."
@@ -28,7 +28,7 @@ $Taglines = @(
     "Every king needs a castle."
     "Where agents serve and dragons compile."
     "The siege of busywork ends here."
-    "Hear ye, hear ye — your agents await."
+    "Hear ye, hear ye -- your agents await."
     "A castle built on open source bedrock."
     "One does not simply walk in without a CLI."
     "The moat is deep but the docs are deeper."
@@ -43,7 +43,7 @@ $Taglines = @(
 
 $Tagline = $Taglines | Get-Random
 
-# ─── Banner ──────────────────────────────────────────────────────────────────
+# --- Banner -------------------------------------------------------------------
 
 function Print-Banner {
     $banner = @(
@@ -76,12 +76,12 @@ function Print-Banner {
     Write-Host ""
     Write-Host "  " -NoNewline
     Write-Host "Castle" -ForegroundColor Blue -NoNewline
-    Write-Host " — The multi-agent workspace" -ForegroundColor DarkGray
+    Write-Host " - The multi-agent workspace" -ForegroundColor DarkGray
     Write-Host "  $Tagline" -ForegroundColor DarkGray
     Write-Host ""
 }
 
-# ─── Help ────────────────────────────────────────────────────────────────────
+# --- Help ---------------------------------------------------------------------
 
 function Print-Usage {
     Write-Host "Castle installer (Windows)"
@@ -107,7 +107,7 @@ function Print-Usage {
     Write-Host '  & ([scriptblock]::Create((iwr -useb https://castlekit.com/install.ps1))) -NoOnboard'
 }
 
-# ─── Environment variable overrides ─────────────────────────────────────────
+# --- Environment variable overrides -------------------------------------------
 
 if (-not $PSBoundParameters.ContainsKey("Version")) {
     if (-not [string]::IsNullOrWhiteSpace($env:CASTLE_VERSION)) {
@@ -125,13 +125,13 @@ if (-not $PSBoundParameters.ContainsKey("DryRun")) {
     }
 }
 
-# ─── Helpers ─────────────────────────────────────────────────────────────────
+# --- Helpers ------------------------------------------------------------------
 
 function Refresh-Path {
     $env:Path = [System.Environment]::GetEnvironmentVariable("Path", "Machine") + ";" + [System.Environment]::GetEnvironmentVariable("Path", "User")
 }
 
-# ─── Node.js ─────────────────────────────────────────────────────────────────
+# --- Node.js ------------------------------------------------------------------
 
 function Check-Node {
     try {
@@ -159,7 +159,7 @@ function Install-Node {
     # Try winget first (Windows 11 / Windows 10 with App Installer)
     if (Get-Command winget -ErrorAction SilentlyContinue) {
         Write-Host "  Using winget..." -ForegroundColor Gray
-        winget install OpenJS.NodeJS.LTS --accept-package-agreements --accept-source-agreements
+        winget install OpenJS.NodeJS.LTS --source winget --accept-package-agreements --accept-source-agreements
         Refresh-Path
         Write-Host "[OK] Node.js installed via winget" -ForegroundColor Green
         return
@@ -193,18 +193,18 @@ function Install-Node {
     exit 1
 }
 
-# ─── Git ─────────────────────────────────────────────────────────────────────
+# --- Git ----------------------------------------------------------------------
 
 function Check-Git {
     if (Get-Command git -ErrorAction SilentlyContinue) {
         Write-Host "[OK] Git found" -ForegroundColor Green
         return $true
     }
-    Write-Host "[!] Git not found (optional — needed for some npm packages)" -ForegroundColor Yellow
+    Write-Host "[!] Git not found (optional -- needed for some npm packages)" -ForegroundColor Yellow
     return $false
 }
 
-# ─── npm PATH ────────────────────────────────────────────────────────────────
+# --- npm PATH -----------------------------------------------------------------
 
 function Ensure-NpmGlobalOnPath {
     $npmPrefix = $null
@@ -254,7 +254,7 @@ function Resolve-CastleBin {
     return $null
 }
 
-# ─── Existing installation ───────────────────────────────────────────────────
+# --- Existing installation ----------------------------------------------------
 
 function Check-ExistingCastle {
     try {
@@ -266,7 +266,7 @@ function Check-ExistingCastle {
     }
 }
 
-# ─── Install Castle ──────────────────────────────────────────────────────────
+# --- Install Castle -----------------------------------------------------------
 
 function Install-Castle {
     $installSpec = "@castlekit/castle@$Version"
@@ -324,7 +324,7 @@ function Install-Castle {
     Write-Host "[OK] Castle installed" -ForegroundColor Green
 }
 
-# ─── Main ────────────────────────────────────────────────────────────────────
+# --- Main ---------------------------------------------------------------------
 
 function Main {
     if ($Help) {
@@ -431,7 +431,7 @@ function Main {
     }
 }
 
-# ─── Entry ───────────────────────────────────────────────────────────────────
+# --- Entry --------------------------------------------------------------------
 
 Print-Banner
 Main

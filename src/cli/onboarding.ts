@@ -329,6 +329,7 @@ export async function runOnboarding(): Promise<void> {
   }
 
   // Step 1: Check for OpenClaw
+  let openclawSkipped = false;
   const openclawSpinner = p.spinner();
   openclawSpinner.start("Checking for OpenClaw...");
 
@@ -356,34 +357,29 @@ export async function runOnboarding(): Promise<void> {
       installSpinner.start("Installing OpenClaw...");
 
       const installCmd = process.platform === "win32"
-        ? 'powershell -NoProfile -ExecutionPolicy Bypass -Command "& { iwr -useb https://openclaw.ai/install.ps1 | iex } -NoOnboard"'
+        ? 'powershell -NoProfile -ExecutionPolicy Bypass -Command "iwr -useb https://openclaw.ai/install.ps1 -OutFile $env:TEMP\\openclaw-install.ps1; & $env:TEMP\\openclaw-install.ps1 -NoOnboard"'
         : 'curl -fsSL --proto "=https" --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --no-onboard --no-prompt';
 
       try {
-        execSync(installCmd, { stdio: "pipe", timeout: 120000 });
+        execSync(installCmd, { stdio: "inherit", timeout: 300000 });
         installSpinner.stop(BLUE("✔ OpenClaw installed"));
       } catch (error) {
+        openclawSkipped = true;
         installSpinner.stop(pc.red("OpenClaw installation failed"));
         const manualCmd = process.platform === "win32"
           ? "iwr -useb https://openclaw.ai/install.ps1 | iex"
           : "curl -fsSL https://openclaw.ai/install.sh | bash";
-        p.note(
-          `Install OpenClaw manually:\n${BLUE_LIGHT(manualCmd)}\n\nThen run: ${BLUE_LIGHT("castle setup")}`,
-          BLUE_BOLD("Manual Install")
+        p.log.warn(
+          `You can install OpenClaw later:\n${BLUE_LIGHT(manualCmd)}`
         );
-        p.outro("Come back when OpenClaw is installed!");
-        process.exit(1);
       }
     } else {
-      const manualCmd = process.platform === "win32"
-        ? "iwr -useb https://openclaw.ai/install.ps1 | iex"
-        : "curl -fsSL https://openclaw.ai/install.sh | bash";
-      p.note(
-        `Install OpenClaw:\n${BLUE_LIGHT(manualCmd)}\n\nThen come back and run:\n${BLUE_LIGHT("castle setup")}`,
-        BLUE_BOLD("Install OpenClaw First")
-      );
-      p.outro("See you soon!");
-      process.exit(0);
+      openclawSkipped = true;
+    }
+
+    if (openclawSkipped && !isOpenClawInstalled()) {
+      // Skip Gateway config — use defaults and continue to build/start Castle
+      p.log.message(pc.dim("Using default settings — you can reconfigure later with castle setup"));
     }
   } else {
     // Auto-detect token and agents in one go
@@ -416,34 +412,49 @@ export async function runOnboarding(): Promise<void> {
   let token = readOpenClawToken();
   let gatewayUrl: string | undefined;
   let isRemote = false;
+  let primaryAgent = "assistant";
+  let agents: DiscoveredAgent[] = [];
 
-  // If we have auto-detected config, offer a choice
-  const hasLocalConfig = !!readOpenClawPort() || isOpenClawInstalled();
+  if (!openclawSkipped) {
+    // If we have auto-detected config, offer a choice
+    const hasLocalConfig = !!readOpenClawPort() || isOpenClawInstalled();
 
-  if (hasLocalConfig && token) {
-    // Both auto-detect and manual are available
-    const connectionMode = await p.select({
-      message: "How would you like to connect?",
-      options: [
-        {
-          value: "auto",
-          label: `Auto-detected local Gateway ${pc.dim(`(port ${port})`)}`,
-          hint: "Recommended for local setups",
-        },
-        {
-          value: "manual",
-          label: "Enter Gateway details manually",
-          hint: "For remote, Tailscale, or custom setups",
-        },
-      ],
-    });
+    if (hasLocalConfig && token) {
+      // Both auto-detect and manual are available
+      const connectionMode = await p.select({
+        message: "How would you like to connect?",
+        options: [
+          {
+            value: "auto",
+            label: `Auto-detected local Gateway ${pc.dim(`(port ${port})`)}`,
+            hint: "Recommended for local setups",
+          },
+          {
+            value: "manual",
+            label: "Enter Gateway details manually",
+            hint: "For remote, Tailscale, or custom setups",
+          },
+        ],
+      });
 
-    if (p.isCancel(connectionMode)) {
-      p.cancel("Setup cancelled.");
-      process.exit(0);
-    }
+      if (p.isCancel(connectionMode)) {
+        p.cancel("Setup cancelled.");
+        process.exit(0);
+      }
 
-    if (connectionMode === "manual") {
+      if (connectionMode === "manual") {
+        const manualResult = await promptManualGateway();
+        if (!manualResult) {
+          p.cancel("Setup cancelled.");
+          process.exit(0);
+        }
+        port = manualResult.port;
+        token = manualResult.token;
+        gatewayUrl = manualResult.gatewayUrl;
+        isRemote = manualResult.isRemote;
+      }
+    } else if (!token) {
+      // No auto-detected token — fall through to manual entry
       const manualResult = await promptManualGateway();
       if (!manualResult) {
         p.cancel("Setup cancelled.");
@@ -454,57 +465,44 @@ export async function runOnboarding(): Promise<void> {
       gatewayUrl = manualResult.gatewayUrl;
       isRemote = manualResult.isRemote;
     }
-  } else if (!token) {
-    // No auto-detected token — fall through to manual entry
-    const manualResult = await promptManualGateway();
-    if (!manualResult) {
-      p.cancel("Setup cancelled.");
-      process.exit(0);
+
+    // Step 3: Agent Discovery (use URL if remote, port if local)
+    const agentTarget = gatewayUrl || port;
+    agents = await discoverAgents(agentTarget, token);
+
+    if (agents.length > 0) {
+
+      const selectedAgent = await p.select({
+        message: "Choose your primary agent",
+        options: agents.map((a) => ({
+          value: a.id,
+          label: `${a.name} ${pc.dim(`<${a.id}>`)}`,
+          hint: a.description || undefined,
+        })),
+      });
+
+      if (p.isCancel(selectedAgent)) {
+        p.cancel("Setup cancelled.");
+        process.exit(0);
+      }
+
+      primaryAgent = selectedAgent as string;
+    } else {
+      const setPrimary = await p.text({
+        message: "Enter the name of your primary agent",
+        initialValue: "assistant",
+        validate(value: string | undefined) {
+          if (!value?.trim()) return "Agent name is required";
+        },
+      });
+
+      if (p.isCancel(setPrimary)) {
+        p.cancel("Setup cancelled.");
+        process.exit(0);
+      }
+
+      primaryAgent = setPrimary as string;
     }
-    port = manualResult.port;
-    token = manualResult.token;
-    gatewayUrl = manualResult.gatewayUrl;
-    isRemote = manualResult.isRemote;
-  }
-
-  // Step 3: Agent Discovery (use URL if remote, port if local)
-  const agentTarget = gatewayUrl || port;
-  const agents = await discoverAgents(agentTarget, token);
-
-  let primaryAgent: string;
-
-  if (agents.length > 0) {
-
-    const selectedAgent = await p.select({
-      message: "Choose your primary agent",
-      options: agents.map((a) => ({
-        value: a.id,
-        label: `${a.name} ${pc.dim(`<${a.id}>`)}`,
-        hint: a.description || undefined,
-      })),
-    });
-
-    if (p.isCancel(selectedAgent)) {
-      p.cancel("Setup cancelled.");
-      process.exit(0);
-    }
-
-    primaryAgent = selectedAgent as string;
-  } else {
-    const setPrimary = await p.text({
-      message: "Enter the name of your primary agent",
-      initialValue: "assistant",
-      validate(value: string | undefined) {
-        if (!value?.trim()) return "Agent name is required";
-      },
-    });
-
-    if (p.isCancel(setPrimary)) {
-      p.cancel("Setup cancelled.");
-      process.exit(0);
-    }
-
-    primaryAgent = setPrimary as string;
   }
 
   // Step 5: Create Castle config
@@ -878,6 +876,11 @@ WantedBy=default.target
   }
 
   p.outro(pc.dim(`Opening ${BLUE(`http://localhost:${castlePort}`)}...`));
-  const open = (await import("open")).default;
-  await open(`http://localhost:${castlePort}`);
+  const url = `http://localhost:${castlePort}`;
+  if (process.platform === "win32") {
+    execSync(`start "" "${url}"`, { stdio: "ignore" });
+  } else {
+    const open = (await import("open")).default;
+    await open(url);
+  }
 }
