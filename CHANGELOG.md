@@ -2,6 +2,28 @@
 
 All notable changes to Castle are documented here.
 
+## 0.4.0 (2026-02-09)
+
+### Changed
+
+- **Pre-build for global installs** — `npm publish` now ships pre-built `.next/standalone/` and `.next/static/` artifacts via a `prepack` script, eliminating the "Build failed" error users hit when installing globally with `npm install -g`
+- Next.js `output: "standalone"` mode enabled — produces a self-contained `server.js` with all dependencies bundled, no `node_modules` needed at runtime
+- Service templates (launchd plist and systemd unit) now use standalone `server.js` directly instead of `next start` when pre-built output is detected
+- Updated `files` array in `package.json` to include `.next/standalone/` and `.next/static/`
+
+### Added
+
+- Node.js 22+ version check at the start of `castle setup` — exits early with a clear message and install instructions if the user's Node version is too old
+- Build error logging — when a dev/git-clone build fails, full output is written to `~/.castle/logs/build.log` and the last 20 lines are shown in the terminal
+- Node.js compile cache (`module.enableCompileCache()`) in `bin/castle.js` for faster CLI startup (follows OpenClaw pattern)
+- Build output check in `castle open` — warns if `.next/` doesn't exist and guides the user to run `castle setup`
+
+### Fixed
+
+- **"Build failed" during global install** — root cause was `npm run build` executing inside the read-only global `node_modules` directory without `devDependencies`. Now skipped entirely for pre-built packages.
+- **Cross-platform native module crash** — standalone bundle no longer ships `node_modules/` (which contained platform-specific binaries like `better-sqlite3` from the build machine). Instead, `NODE_PATH` resolves packages from the npm-installed `node_modules/` with correct platform binaries.
+- **Server bound to all interfaces** — standalone server now binds to `127.0.0.1` (localhost only) instead of `0.0.0.0`, ensuring Castle is not accessible from other machines on the network
+
 ## 0.3.2 (2026-02-09)
 
 ### Added

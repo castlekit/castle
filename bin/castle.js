@@ -3,6 +3,12 @@
 // Castle CLI - The multi-agent workspace
 // https://castlekit.com
 
+// Enable Node.js compile cache for faster startup (same pattern as OpenClaw)
+import module from "node:module";
+if (module.enableCompileCache && !process.env.NODE_DISABLE_COMPILE_CACHE) {
+  try { module.enableCompileCache(); } catch { /* ignore */ }
+}
+
 // Bootstrap tsx from the package's own node_modules so it works
 // regardless of the user's current working directory.
 import { dirname, resolve } from "path";
@@ -50,6 +56,17 @@ program
   .description("Open Castle in the browser")
   .action(async () => {
     const { readConfig, configExists } = await import("../src/lib/config.ts");
+    const { existsSync } = await import("fs");
+
+    // Verify build output exists before trying to open
+    const nextDir = resolve(__dirname, "..", ".next");
+    if (!existsSync(nextDir)) {
+      console.log(pc.bold("\n  🏰 Castle\n"));
+      console.log(pc.red("  Castle has not been built yet.\n"));
+      console.log(`  Run ${pc.cyan("castle setup")} to build and start Castle.\n`);
+      return;
+    }
+
     const open = (await import("open")).default;
     const port = configExists() ? readConfig().server?.port || 3333 : 3333;
     const url = `http://localhost:${port}`;
