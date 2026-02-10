@@ -355,28 +355,31 @@ export async function runOnboarding(): Promise<void> {
       const installSpinner = p.spinner();
       installSpinner.start("Installing OpenClaw...");
 
+      const installCmd = process.platform === "win32"
+        ? 'powershell -NoProfile -ExecutionPolicy Bypass -Command "& { iwr -useb https://openclaw.ai/install.ps1 | iex } -NoOnboard"'
+        : 'curl -fsSL --proto "=https" --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --no-onboard --no-prompt';
+
       try {
-        execSync(
-          'curl -fsSL --proto "=https" --tlsv1.2 https://openclaw.ai/install.sh | bash -s -- --no-onboard --no-prompt',
-          { stdio: "pipe", timeout: 120000 }
-        );
+        execSync(installCmd, { stdio: "pipe", timeout: 120000 });
         installSpinner.stop(BLUE("✔ OpenClaw installed"));
       } catch (error) {
         installSpinner.stop(pc.red("OpenClaw installation failed"));
+        const manualCmd = process.platform === "win32"
+          ? "iwr -useb https://openclaw.ai/install.ps1 | iex"
+          : "curl -fsSL https://openclaw.ai/install.sh | bash";
         p.note(
-          `Install OpenClaw manually:\n${BLUE_LIGHT(
-            "curl -fsSL https://openclaw.ai/install.sh | bash"
-          )}\n\nThen run: ${BLUE_LIGHT("castle setup")}`,
+          `Install OpenClaw manually:\n${BLUE_LIGHT(manualCmd)}\n\nThen run: ${BLUE_LIGHT("castle setup")}`,
           BLUE_BOLD("Manual Install")
         );
         p.outro("Come back when OpenClaw is installed!");
         process.exit(1);
       }
     } else {
+      const manualCmd = process.platform === "win32"
+        ? "iwr -useb https://openclaw.ai/install.ps1 | iex"
+        : "curl -fsSL https://openclaw.ai/install.sh | bash";
       p.note(
-        `Install OpenClaw:\n${BLUE_LIGHT(
-          "curl -fsSL https://openclaw.ai/install.sh | bash"
-        )}\n\nThen come back and run:\n${BLUE_LIGHT("castle setup")}`,
+        `Install OpenClaw:\n${BLUE_LIGHT(manualCmd)}\n\nThen come back and run:\n${BLUE_LIGHT("castle setup")}`,
         BLUE_BOLD("Install OpenClaw First")
       );
       p.outro("See you soon!");
@@ -619,12 +622,37 @@ export async function runOnboarding(): Promise<void> {
 
   // Write PID file helper
   const pidFile = join(castleDir, "server.pid");
+  const isWin = process.platform === "win32";
+
+  // Stop existing service FIRST — otherwise the service manager respawns
+  // the old server immediately after we kill it, stealing the port.
+  if (process.platform === "darwin") {
+    const plistPath = join(home(), "Library", "LaunchAgents", "com.castlekit.castle.plist");
+    try {
+      execSyncChild(`launchctl unload "${plistPath}" 2>/dev/null`, { stdio: "ignore", timeout: 10000 });
+    } catch { /* no existing service */ }
+  } else if (process.platform === "linux") {
+    try {
+      execSyncChild("systemctl --user stop castle.service 2>/dev/null", { stdio: "ignore", timeout: 10000 });
+    } catch { /* no existing service */ }
+  } else if (isWin) {
+    try {
+      execSyncChild('schtasks /End /TN "CastleServer" 2>nul', { stdio: "ignore", timeout: 10000 });
+    } catch { /* no existing task */ }
+    try {
+      execSyncChild('schtasks /Delete /TN "CastleServer" /F 2>nul', { stdio: "ignore", timeout: 10000 });
+    } catch { /* no existing task */ }
+  }
 
   // Kill any existing Castle server (by PID file)
   try {
     const existingPid = parseInt(readF(pidFile, "utf-8").trim(), 10);
     if (Number.isInteger(existingPid) && existingPid > 0) {
-      process.kill(existingPid);
+      if (isWin) {
+        try { execSyncChild(`taskkill /PID ${existingPid} /F 2>nul`, { stdio: "ignore", timeout: 5000 }); } catch { /* ignore */ }
+      } else {
+        process.kill(existingPid);
+      }
       for (let i = 0; i < 30; i++) {
         try {
           process.kill(existingPid, 0);
@@ -639,14 +667,35 @@ export async function runOnboarding(): Promise<void> {
   }
 
   // Kill anything else on the target port
-  try {
-    execSyncChild(`lsof -ti:${castlePort} | xargs kill -9 2>/dev/null`, {
-      stdio: "ignore",
-      timeout: 5000,
-    });
-    await new Promise((r) => setTimeout(r, 500));
-  } catch {
-    // Nothing on port or lsof not available
+  if (isWin) {
+    try {
+      const netstatOut = execSyncChild(
+        `netstat -ano | findstr ":${castlePort} " | findstr "LISTENING"`,
+        { encoding: "utf-8", timeout: 5000 }
+      ).toString();
+      const pids = new Set<string>();
+      for (const line of netstatOut.split("\n")) {
+        const parts = line.trim().split(/\s+/);
+        const pid = parts[parts.length - 1];
+        if (pid && /^\d+$/.test(pid) && pid !== "0") pids.add(pid);
+      }
+      for (const pid of pids) {
+        try { execSyncChild(`taskkill /PID ${pid} /F 2>nul`, { stdio: "ignore", timeout: 5000 }); } catch { /* ignore */ }
+      }
+      if (pids.size > 0) await new Promise((r) => setTimeout(r, 500));
+    } catch {
+      // Nothing on port or netstat not available
+    }
+  } else {
+    try {
+      execSyncChild(`lsof -ti:${castlePort} | xargs kill -9 2>/dev/null`, {
+        stdio: "ignore",
+        timeout: 5000,
+      });
+      await new Promise((r) => setTimeout(r, 500));
+    } catch {
+      // Nothing on port or lsof not available
+    }
   }
 
   // Escape XML special characters for plist values
@@ -693,9 +742,7 @@ ${plistEnvEntries}
     </dict>
 </dict>
 </plist>`;
-    try {
-      execSyncChild(`launchctl unload "${plistPath}" 2>/dev/null`, { stdio: "ignore", timeout: 10000 });
-    } catch { /* ignore */ }
+    // Service was already unloaded above — just write new plist and load
     writeFile(plistPath, plist);
     try {
       execSyncChild(`launchctl load "${plistPath}"`, { stdio: "ignore", timeout: 10000 });
@@ -727,6 +774,32 @@ WantedBy=default.target
     writeFile(servicePath, service);
     try {
       execSyncChild("systemctl --user daemon-reload && systemctl --user enable --now castle.service", { stdio: "ignore", timeout: 15000 });
+    } catch {
+      // Non-fatal
+    }
+  } else if (isWin) {
+    // Windows: use Task Scheduler to run Castle at logon
+    // Build a batch wrapper that sets environment variables and starts the server
+    const batPath = join(castleDir, "start-server.bat");
+    const envLines = Object.entries(serverEnv)
+      .map(([k, v]) => `set "${k}=${v}"`)
+      .join("\r\n");
+    const batContent = `@echo off\r\n${envLines}\r\ncd /d "${PROJECT_ROOT}"\r\n"${nodePath}" ${serverArgs.map((a) => `"${a}"`).join(" ")}\r\n`;
+    writeFile(batPath, batContent);
+
+    // Task was already deleted above — create fresh
+    try {
+      execSyncChild(
+        `schtasks /Create /TN "CastleServer" /TR "\\"${batPath}\\"" /SC ONLOGON /RL HIGHEST /F 2>nul`,
+        { stdio: "ignore", timeout: 10000 }
+      );
+    } catch {
+      // Non-fatal — fall back to spawning directly
+    }
+
+    // Also start the task now
+    try {
+      execSyncChild('schtasks /Run /TN "CastleServer" 2>nul', { stdio: "ignore", timeout: 10000 });
     } catch {
       // Non-fatal
     }
