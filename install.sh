@@ -765,7 +765,11 @@ fi
 
 if [[ "$OS" == "unknown" ]]; then
     echo -e "${ERROR}Error: Unsupported operating system${NC}"
+    echo ""
     echo "This installer supports macOS and Linux (including WSL)."
+    echo ""
+    echo -e "For ${INFO}Windows${NC} (PowerShell):"
+    echo -e "  ${ACCENT}iwr -useb https://castlekit.com/install.ps1 | iex${NC}"
     exit 1
 fi
 

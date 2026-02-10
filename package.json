@@ -1,6 +1,6 @@
 {
   "name": "@castlekit/castle",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "The multi-agent workspace",
   "type": "module",
   "bin": {
@@ -14,6 +14,7 @@
     "public/",
     "index.js",
     "install.sh",
+    "install.ps1",
     "next.config.ts",
     "postcss.config.mjs",
     "tsconfig.json",

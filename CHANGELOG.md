@@ -2,6 +2,18 @@
 
 All notable changes to Castle are documented here.
 
+## 0.4.1 (2026-02-10)
+
+### Added
+
+- **Windows support** — new `install.ps1` PowerShell installer (`iwr -useb https://castlekit.com/install.ps1 | iex`) with Node.js auto-install via winget/Chocolatey/Scoop, version detection, PATH management, and Castle branding
+- **Windows `castle setup`** — onboarding now handles Windows: port killing via `netstat`/`taskkill`, auto-start via Task Scheduler (`schtasks`), and OpenClaw install via PowerShell
+- `install.sh` now shows the PowerShell command when run on an unsupported OS
+
+### Fixed
+
+- **EADDRINUSE during `castle setup`** — service manager (`launchctl`/`systemd`/`schtasks`) is now unloaded *before* killing processes on the port, preventing the old service from respawning and stealing the port
+
 ## 0.4.0 (2026-02-09)
 
 ### Changed
