@@ -2,6 +2,16 @@
 
 All notable changes to Castle are documented here.
 
+## 0.4.3 (2026-02-12)
+
+### Changed
+
+- **Agent avatar storage** — agent avatars are now saved to Castle's own directory (`~/.castle/avatars/`) instead of each agent's workspace. OpenClaw config is updated via the Gateway's `config.patch` RPC — Castle no longer writes to OpenClaw config or workspace files directly.
+
+### Fixed
+
+- **Agent avatar display** — absolute paths under `~/.castle/avatars/` (from avatar upload) are now correctly resolved to the proxy URL so avatars display in the UI after upload.
+
 ## 0.4.2 (2026-02-10)
 
 ### Fixed

@@ -140,6 +140,29 @@ describe("Agents API", () => {
     expect(mockGw.setAvatarUrl).toHaveBeenCalledWith("abc123def", "http://gw:18789/api/v1/avatars/abc123def");
   });
 
+  it("GET should resolve absolute paths under ~/.castle/avatars/", async () => {
+    const { homedir } = await import("os");
+    const { join } = await import("path");
+    const castleAvatarPath = join(homedir(), ".castle", "avatars", "main.png");
+
+    const { GET } = await import("../route");
+
+    mockGw.request.mockImplementation(async (method: string) => {
+      if (method === "agents.list") {
+        return {
+          agents: [{ id: "main", identity: { name: "Sam", avatar: castleAvatarPath } }],
+        };
+      }
+      if (method === "config.get") return { parsed: {} };
+      return {};
+    });
+
+    const res = await GET();
+    const data = await res.json();
+
+    expect(data.agents[0].avatar).toBe("/api/avatars/main");
+  });
+
   it("GET should pass through data URIs", async () => {
     const { GET } = await import("../route");
 

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from "fs";
+import { writeFileSync, mkdirSync } from "fs";
 import { join } from "path";
 import { homedir } from "os";
-import JSON5 from "json5";
 import sharp from "sharp";
 import { ensureGateway } from "@/lib/gateway-connection";
 import { checkCsrf } from "@/lib/api-security";
@@ -19,21 +18,6 @@ const ALLOWED_TYPES = new Set([
   "image/webp",
   "image/gif",
 ]);
-
-interface AgentConfig {
-  id: string;
-  workspace?: string;
-  identity?: Record<string, unknown>;
-  [key: string]: unknown;
-}
-
-interface OpenClawConfig {
-  agents?: {
-    list?: AgentConfig[];
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
-}
 
 /**
  * Resize and compress an avatar image to 256x256, under 100KB.
@@ -60,26 +44,12 @@ async function processAvatar(input: Buffer): Promise<{ data: Buffer; ext: string
 }
 
 /**
- * Find the OpenClaw config file path.
- */
-function getOpenClawConfigPath(): string | null {
-  const paths = [
-    join(homedir(), ".openclaw", "openclaw.json"),
-    join(homedir(), ".openclaw", "openclaw.json5"),
-  ];
-  for (const p of paths) {
-    if (existsSync(p)) return p;
-  }
-  return null;
-}
-
-/**
  * POST /api/openclaw/agents/[id]/avatar
  *
  * Upload a new avatar image for an agent.
  * - Resizes to 256x256 and compresses under 100KB
- * - Saves to the agent's workspace directory
- * - Writes config file directly (Gateway hot-reloads identity changes, no restart needed)
+ * - Saves to Castle's own avatars directory (~/.castle/avatars/)
+ * - Updates OpenClaw config via Gateway's config.patch RPC (never writes to OpenClaw files directly)
  */
 export async function POST(
   request: NextRequest,
@@ -128,46 +98,9 @@ export async function POST(
     );
   }
 
-  // Read the OpenClaw config file directly
-  const configPath = getOpenClawConfigPath();
-  if (!configPath) {
-    return NextResponse.json(
-      { error: "OpenClaw config file not found" },
-      { status: 500 }
-    );
-  }
-
-  let config: OpenClawConfig;
-  try {
-    config = JSON5.parse(readFileSync(configPath, "utf-8"));
-  } catch (err) {
-    return NextResponse.json(
-      { error: `Failed to read config: ${err instanceof Error ? err.message : "unknown"}` },
-      { status: 500 }
-    );
-  }
-
-  const agents = config.agents?.list || [];
-  const agent = agents.find((a) => a.id === safeId);
-
-  if (!agent) {
-    return NextResponse.json({ error: "Agent not found" }, { status: 404 });
-  }
-
-  if (!agent.workspace) {
-    return NextResponse.json(
-      { error: "Agent has no workspace configured" },
-      { status: 400 }
-    );
-  }
-
-  const workspacePath = agent.workspace.startsWith("~")
-    ? join(homedir(), agent.workspace.slice(1))
-    : agent.workspace;
-
-  // Save processed avatar to workspace
-  const avatarsDir = join(workspacePath, "avatars");
-  const fileName = `avatar${processed.ext}`;
+  // Save processed avatar to Castle's own directory — never write to OpenClaw's filesystem
+  const avatarsDir = join(homedir(), ".castle", "avatars");
+  const fileName = `${safeId}${processed.ext}`;
   const filePath = join(avatarsDir, fileName);
 
   try {
@@ -180,37 +113,64 @@ export async function POST(
     );
   }
 
-  // Update config file directly — Gateway's file watcher hot-reloads identity changes
-  // No config.patch, no restart, no WebSocket disconnect
-  try {
-    agent.identity = agent.identity || {};
-    agent.identity.avatar = `avatars/${fileName}`;
-    writeFileSync(configPath, JSON5.stringify(config, null, 2), "utf-8");
-  } catch (err) {
-    return NextResponse.json(
-      { error: `Failed to update config: ${err instanceof Error ? err.message : "unknown"}` },
-      { status: 500 }
-    );
+  // Update OpenClaw config via Gateway's config.patch RPC — the proper way to
+  // modify OpenClaw config without writing to its files directly.
+  const gw = ensureGateway();
+
+  if (!gw.isConnected) {
+    // Avatar is saved locally; config update will happen when Gateway reconnects
+    return NextResponse.json({
+      success: true,
+      avatar: filePath,
+      size: processed.data.length,
+      message: "Avatar saved locally. Gateway not connected — config will update when it reconnects.",
+      configUpdated: false,
+    });
   }
 
-  // Wait briefly for Gateway's file watcher to hot-reload (~300ms debounce)
-  await new Promise((resolve) => setTimeout(resolve, 500));
-
-  // Refresh Castle's agent list from the Gateway
   try {
-    const gw = ensureGateway();
-    if (gw.isConnected) {
-      // Emit a signal so SSE clients re-fetch agents
-      gw.emit("agentAvatarUpdated", { agentId: safeId });
-    }
+    // Use config.patch to set the agent's avatar path.
+    // Gateway validates and applies the patch, then hot-reloads.
+    await gw.request("config.patch", {
+      agents: {
+        list: [
+          {
+            id: safeId,
+            identity: {
+              avatar: filePath,
+            },
+          },
+        ],
+      },
+    });
+    console.log(`[Avatar API] Config patched for agent ${safeId}`);
+  } catch (err) {
+    console.error(
+      `[Avatar API] config.patch failed for agent ${safeId}:`,
+      err instanceof Error ? err.message : "unknown"
+    );
+    // Avatar is still saved locally — not a total failure
+    return NextResponse.json({
+      success: true,
+      avatar: filePath,
+      size: processed.data.length,
+      message: "Avatar saved but config update failed. Try restarting the Gateway.",
+      configUpdated: false,
+    });
+  }
+
+  // Emit a signal so SSE clients re-fetch agents
+  try {
+    gw.emit("agentAvatarUpdated", { agentId: safeId });
   } catch {
     // Non-critical
   }
 
   return NextResponse.json({
     success: true,
-    avatar: `avatars/${fileName}`,
+    avatar: filePath,
     size: processed.data.length,
     message: "Avatar updated",
+    configUpdated: true,
   });
 }
