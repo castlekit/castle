@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
+import { join, resolve } from "path";
+import { homedir } from "os";
 import { ensureGateway } from "@/lib/gateway-connection";
 
 export const dynamic = "force-dynamic";
+
+const CASTLE_AVATARS_DIR = join(homedir(), ".castle", "avatars");
 
 interface AgentIdentity {
   name?: string;
@@ -84,6 +88,14 @@ function resolveAvatarUrl(
     const key = `agent-${agentId}`;
     gw.setAvatarUrl(key, `workspace://${workspace}/${avatar}`);
     return `/api/avatars/${key}`;
+  }
+
+  // Absolute path under ~/.castle/avatars/ (from avatar upload via config.patch)
+  if (avatar.startsWith("/") || avatar.startsWith("~")) {
+    const normalized = resolve(avatar.replace(/^~/, homedir()));
+    if (normalized.startsWith(CASTLE_AVATARS_DIR + "/") || normalized === CASTLE_AVATARS_DIR) {
+      return `/api/avatars/${agentId}`;
+    }
   }
 
   return null;
